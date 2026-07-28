@@ -1,0 +1,73 @@
+{
+  "id": "main-reading-flow",
+  "title": "Daily reading journey",
+  "description": "A reader discovers a story, chooses a reading mode, listens, or saves it for later.",
+  "nodes": [
+    {
+      "id": "today",
+      "screen": "screens/today/screen.json",
+      "position": {
+        "x": 60,
+        "y": 190
+      }
+    },
+    {
+      "id": "story",
+      "screen": "screens/story/screen.json",
+      "position": {
+        "x": 390,
+        "y": 190
+      }
+    },
+    {
+      "id": "focus",
+      "screen": "screens/focus/screen.json",
+      "position": {
+        "x": 740,
+        "y": 20
+      }
+    },
+    {
+      "id": "listen",
+      "screen": "screens/listen/screen.json",
+      "position": {
+        "x": 740,
+        "y": 310
+      }
+    },
+    {
+      "id": "saved",
+      "screen": "screens/saved/screen.json",
+      "position": {
+        "x": 740,
+        "y": 600
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "today-story",
+      "source": "today",
+      "target": "story",
+      "label": "Open lead story"
+    },
+    {
+      "id": "story-focus",
+      "source": "story",
+      "target": "focus",
+      "label": "Enter focus mode"
+    },
+    {
+      "id": "story-listen",
+      "source": "story",
+      "target": "listen",
+      "label": "Play audio"
+    },
+    {
+      "id": "story-saved",
+      "source": "story",
+      "target": "saved",
+      "label": "Save story"
+    }
+  ]
+}

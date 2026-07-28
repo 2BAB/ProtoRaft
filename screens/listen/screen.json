@@ -1,0 +1,30 @@
+{
+  "id": "listen",
+  "title": "Now Playing",
+  "route": "/listen/a-city-learning-to-listen",
+  "stage": "wireframe",
+  "purpose": "Offer a focused audio experience while preserving a direct path back to the written story.",
+  "wireframe": "wireframe.png",
+  "entry": [
+    "Tap Listen on a story",
+    "Resume from the mini player"
+  ],
+  "actions": [
+    {
+      "label": "Play or pause",
+      "target": "listen"
+    },
+    {
+      "label": "Open written story",
+      "target": "story"
+    }
+  ],
+  "states": [
+    "Paused",
+    "Playing"
+  ],
+  "linkedDocuments": [
+    "product-brief",
+    "interaction-spec"
+  ]
+}

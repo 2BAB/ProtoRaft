@@ -1,0 +1,31 @@
+{
+  "id": "today",
+  "title": "Today",
+  "route": "/today",
+  "stage": "wireframe",
+  "purpose": "Give the reader one clear starting point plus a compact scan of the day's edition.",
+  "wireframe": "wireframe.png",
+  "entry": [
+    "App launch",
+    "Tap Today in bottom navigation"
+  ],
+  "actions": [
+    {
+      "label": "Open lead story",
+      "target": "story"
+    },
+    {
+      "label": "Filter by topic",
+      "target": "today"
+    }
+  ],
+  "states": [
+    "Default",
+    "Topic filtered",
+    "Offline cache available"
+  ],
+  "linkedDocuments": [
+    "product-brief",
+    "interaction-spec"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "focus",
+  "title": "Focus reading",
+  "route": "/story/a-city-learning-to-listen/focus",
+  "stage": "wireframe",
+  "purpose": "Create a quiet reading surface with only essential progress and typography controls.",
+  "wireframe": "wireframe.png",
+  "entry": [
+    "Tap Focus on a story"
+  ],
+  "actions": [
+    {
+      "label": "Change text size",
+      "target": "focus"
+    },
+    {
+      "label": "Exit focus mode",
+      "target": "story"
+    }
+  ],
+  "states": [
+    "Default",
+    "Typography controls open",
+    "Reading progress restored"
+  ],
+  "linkedDocuments": [
+    "product-brief",
+    "interaction-spec"
+  ]
+}
