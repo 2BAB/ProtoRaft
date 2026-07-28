@@ -21,7 +21,11 @@
   ],
   "states": [
     "Paused",
-    "Playing"
+    "Playing",
+    "Buffering",
+    "Playback rate changed",
+    "Queue expanded",
+    "Dismissed to mini player"
   ],
   "linkedDocuments": [
     "product-brief",
