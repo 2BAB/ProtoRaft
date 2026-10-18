@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "0.1",
+  "components": [
+    {
+      "id": "publication-header",
+      "name": "Publication header",
+      "category": "navigation",
+      "platforms": [
+        "web",
+        "ios",
+        "android"
+      ],
+      "variants": [
+        "root",
+        "contextual"
+      ],
+      "states": [
+        "default",
+        "scrolled"
+      ],
+      "description": "Masthead, date, and contextual actions for root and nested screens."
+    },
+    {
+      "id": "topic-filter",
+      "name": "Topic filter",
+      "category": "input",
+      "platforms": [
+        "web",
+        "ios",
+        "android"
+      ],
+      "variants": [
+        "text",
+        "compact"
+      ],
+      "states": [
+        "idle",
+        "selected",
+        "pressed",
+        "focus-visible"
+      ],
+      "description": "A quiet single-select topic control that preserves the lead story."
+    },
+    {
+      "id": "story-card",
+      "name": "Story card",
+      "category": "content",
+      "platforms": [
+        "web",
+        "ios",
+        "android"
+      ],
+      "variants": [
+        "lead",
+        "brief",
+        "saved"
+      ],
+      "states": [
+        "default",
+        "saved",
+        "downloaded",
+        "in-progress"
+      ],
+      "description": "Editorial summary with predictable reading and save metadata."
+    },
+    {
+      "id": "reading-toolbar",
+      "name": "Reading toolbar",
+      "category": "control",
+      "platforms": [
+        "ios",
+        "android"
+      ],
+      "variants": [
+        "standard",
+        "focus"
+      ],
+      "states": [
+        "hidden",
+        "visible",
+        "text-controls-open"
+      ],
+      "description": "Reading progress and typography controls for standard and focus modes."
+    },
+    {
+      "id": "audio-player",
+      "name": "Audio player",
+      "category": "media",
+      "platforms": [
+        "web",
+        "ios",
+        "android"
+      ],
+      "variants": [
+        "full",
+        "mini"
+      ],
+      "states": [
+        "paused",
+        "playing",
+        "complete"
+      ],
+      "description": "Shared playback behavior across full and compact surfaces."
+    },
+    {
+      "id": "bottom-navigation",
+      "name": "Bottom navigation",
+      "category": "navigation",
+      "platforms": [
+        "ios",
+        "android"
+      ],
+      "variants": [
+        "three-destination"
+      ],
+      "states": [
+        "today-selected",
+        "listen-selected",
+        "saved-selected"
+      ],
+      "description": "Stable top-level navigation for the three primary destinations."
+    }
+  ]
+}

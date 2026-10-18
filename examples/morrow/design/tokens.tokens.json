@@ -1,0 +1,120 @@
+{
+  "$description": "Morrow v0.1 design tokens using the DTCG token shape.",
+  "color": {
+    "paper": {
+      "$type": "color",
+      "$value": "#FCFDFE",
+      "$description": "Cool-white page background"
+    },
+    "ink": {
+      "$type": "color",
+      "$value": "#171A1A",
+      "$description": "Primary text and icon color"
+    },
+    "muted": {
+      "$type": "color",
+      "$value": "#6D6D6D",
+      "$description": "Secondary copy and metadata"
+    },
+    "line": {
+      "$type": "color",
+      "$value": "#E5E7EB",
+      "$description": "Dividers and quiet outlines"
+    },
+    "surface": {
+      "$type": "color",
+      "$value": "#FFFFFF",
+      "$description": "Raised and bounded content surface"
+    },
+    "signal": {
+      "$type": "color",
+      "$value": "#4095C6",
+      "$description": "Selected and active states"
+    },
+    "signalSoft": {
+      "$type": "color",
+      "$value": "#DDE8E1",
+      "$description": "Watercolor-cyan selection background"
+    }
+  },
+  "font": {
+    "editorial": {
+      "$type": "fontFamily",
+      "$value": "Georgia, Times New Roman, serif",
+      "$description": "Story headlines and long-form reading text"
+    },
+    "interface": {
+      "$type": "fontFamily",
+      "$value": "Inter, ui-sans-serif, system-ui, sans-serif",
+      "$description": "Navigation, controls, and metadata"
+    }
+  },
+  "space": {
+    "1": {
+      "$type": "dimension",
+      "$value": {
+        "value": 4,
+        "unit": "px"
+      },
+      "$description": "Tight icon and label spacing"
+    },
+    "2": {
+      "$type": "dimension",
+      "$value": {
+        "value": 8,
+        "unit": "px"
+      },
+      "$description": "Related inline element spacing"
+    },
+    "3": {
+      "$type": "dimension",
+      "$value": {
+        "value": 12,
+        "unit": "px"
+      },
+      "$description": "Compact control padding"
+    },
+    "4": {
+      "$type": "dimension",
+      "$value": {
+        "value": 16,
+        "unit": "px"
+      },
+      "$description": "Default content rhythm"
+    },
+    "6": {
+      "$type": "dimension",
+      "$value": {
+        "value": 24,
+        "unit": "px"
+      },
+      "$description": "Section separation"
+    },
+    "8": {
+      "$type": "dimension",
+      "$value": {
+        "value": 32,
+        "unit": "px"
+      },
+      "$description": "Major editorial separation"
+    }
+  },
+  "radius": {
+    "control": {
+      "$type": "dimension",
+      "$value": {
+        "value": 6,
+        "unit": "px"
+      },
+      "$description": "Interactive control corners"
+    },
+    "surface": {
+      "$type": "dimension",
+      "$value": {
+        "value": 8,
+        "unit": "px"
+      },
+      "$description": "Content surface corners"
+    }
+  }
+}

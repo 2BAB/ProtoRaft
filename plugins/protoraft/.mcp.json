@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "protoraft": {
+      "title": "ProtoRaft Workbench",
+      "description": "Open the ProtoRaft workbench and safely manage project artifacts stored in a Git repository.",
+      "command": "node",
+      "args": [
+        "./dist/server.mjs",
+        "--stdio"
+      ],
+      "cwd": ".",
+      "tool_timeout_sec": 300
+    }
+  }
+}

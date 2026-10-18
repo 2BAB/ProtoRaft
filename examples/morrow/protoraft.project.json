@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "0.1",
+  "projectId": "morrow-v0.1",
+  "name": "Morrow",
+  "version": "0.1",
+  "summary": "A calm daily magazine that helps curious readers move from discovery to focused reading, listening, and saving.",
+  "locale": "en-US",
+  "flow": "flows/main.flow.json",
+  "discussions": "documents/discussions.json",
+  "documents": [
+    {
+      "id": "product-brief",
+      "title": "Product brief",
+      "path": "documents/product-brief.md",
+      "screenIds": [
+        "today",
+        "story",
+        "focus",
+        "listen",
+        "saved"
+      ]
+    },
+    {
+      "id": "interaction-spec",
+      "title": "Interaction spec",
+      "path": "documents/interaction-spec.md",
+      "screenIds": [
+        "today",
+        "story",
+        "focus",
+        "listen",
+        "saved"
+      ]
+    }
+  ],
+  "designSystem": {
+    "tokens": "design/tokens.tokens.json",
+    "components": "design/components.json"
+  },
+  "hifi": {
+    "routes": "hifi/routes.json",
+    "defaultRoute": "/today"
+  },
+  "collaboration": {
+    "sourceOfTruth": "git",
+    "defaultBranch": "main",
+    "mode": "asynchronous",
+    "reviewScenarios": "collaboration/review-scenarios.json"
+  }
+}

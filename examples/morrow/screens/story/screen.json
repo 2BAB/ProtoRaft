@@ -1,0 +1,36 @@
+{
+  "id": "story",
+  "title": "Story",
+  "route": "/story/a-city-learning-to-listen",
+  "stage": "wireframe",
+  "purpose": "Let readers understand a story quickly and choose between standard reading, focus mode, listening, or saving.",
+  "wireframe": "wireframe.png",
+  "entry": [
+    "Tap any story card",
+    "Open a shared story link"
+  ],
+  "actions": [
+    {
+      "label": "Enter focus mode",
+      "target": "focus"
+    },
+    {
+      "label": "Play audio",
+      "target": "listen"
+    },
+    {
+      "label": "Save story",
+      "target": "saved"
+    }
+  ],
+  "states": [
+    "Default",
+    "Saved",
+    "Audio available",
+    "Member preview"
+  ],
+  "linkedDocuments": [
+    "product-brief",
+    "interaction-spec"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "protoraft",
+  "version": "0.1.0",
+  "description": "Turn a product idea into a discussion-ready wireframe, shared design core, and implementation preview.",
+  "author": {
+    "name": "2BAB"
+  },
+  "license": "MIT",
+  "keywords": [
+    "product-design",
+    "wireframes",
+    "product-requirements",
+    "design-systems",
+    "prototyping"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ProtoRaft",
+    "shortDescription": "Go from a quick wireframe to a shared design core.",
+    "longDescription": "ProtoRaft gives product and marketing teams a Codex-native workbench for one-minute atomic wireframes with discussion notes, lightweight product documents, design tokens, component contracts, HiFi previews, native core sync, and Git-based review.",
+    "developerName": "2BAB",
+    "category": "Productivity",
+    "brandColor": "#111111",
+    "capabilities": [
+      "Atomic wireframe generation",
+      "Wireflow map and list views",
+      "Screen-linked discussion notes",
+      "Product documentation",
+      "Design tokens and components",
+      "Interactive HiFi previews",
+      "Android and iOS core sync",
+      "Git branch comparison",
+      "Scheduled canvas freshness review",
+      "Read-only project publishing with Codex Sites"
+    ],
+    "defaultPrompt": [
+      "Open ProtoRaft for this project.",
+      "Check whether this ProtoRaft canvas is current.",
+      "Compare the current ProtoRaft branch against main."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

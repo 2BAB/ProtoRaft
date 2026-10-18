@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "0.1",
+  "comparisons": [
+    {
+      "id": "persistent-audio-v0.1",
+      "base": "main",
+      "compare": "feature/morrow-listen",
+      "title": "Decide where playback continues after closing Now Playing",
+      "changes": [
+        {
+          "path": "screens/listen/screen.json",
+          "summary": "Adds queue, playback-rate, and persistent mini-player states."
+        },
+        {
+          "path": "screens/listen/wireframe.png",
+          "summary": "Expands Now Playing with speed, queue, and secondary audio controls."
+        },
+        {
+          "path": "documents/interaction-spec.md",
+          "summary": "The feature branch changes mini-player dismissal behavior.",
+          "recommendation": "Keep playback active and show the mini player on Story and Saved. Leave Today unchanged in v0.1 to avoid adding persistent media state to the daily entry point.",
+          "resolutionCriteria": [
+            "Closing Now Playing keeps active playback running.",
+            "Story and Saved can show the persistent mini player.",
+            "Today remains unchanged in v0.1.",
+            "Returning to Story restores the reader's previous position.",
+            "The interaction spec, Listen screen, and audio-player contract agree."
+          ]
+        },
+        {
+          "path": "design/components.json",
+          "summary": "Adds Buffering and Dismissed-to-mini states to Audio player."
+        }
+      ]
+    }
+  ]
+}

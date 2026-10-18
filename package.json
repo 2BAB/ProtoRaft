@@ -1,0 +1,17 @@
+{
+  "name": "protoraft-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.19.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter protoraft dev",
+    "build": "pnpm --filter protoraft build",
+    "check": "pnpm --filter protoraft check",
+    "test": "pnpm --filter protoraft test",
+    "validate:plugin": "node scripts/validate-plugin.mjs",
+    "verify": "pnpm check && pnpm validate:plugin"
+  }
+}

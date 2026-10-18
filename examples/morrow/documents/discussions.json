@@ -1,0 +1,18 @@
+{
+  "notes": [
+    {
+      "id": "note_story_audio",
+      "screenId": "story",
+      "author": "Mina",
+      "body": "Keep Listen in the first action row. Audio is a core route, not an overflow action.",
+      "createdAt": "2026-07-28T09:46:00.000Z"
+    },
+    {
+      "id": "note_story_focus",
+      "screenId": "story",
+      "author": "Theo",
+      "body": "Focus mode should inherit the reader's text size and return to the same paragraph.",
+      "createdAt": "2026-07-28T09:51:00.000Z"
+    }
+  ]
+}

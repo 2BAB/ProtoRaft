@@ -1,0 +1,32 @@
+{
+  "id": "saved",
+  "title": "Saved",
+  "route": "/saved",
+  "stage": "wireframe",
+  "purpose": "Help readers resume unfinished stories and manage a useful personal reading list.",
+  "wireframe": "wireframe.png",
+  "entry": [
+    "Tap Saved in bottom navigation",
+    "Save a story"
+  ],
+  "actions": [
+    {
+      "label": "Resume story",
+      "target": "story"
+    },
+    {
+      "label": "Remove from saved",
+      "target": "saved"
+    }
+  ],
+  "states": [
+    "Default",
+    "Empty library",
+    "Downloaded",
+    "Filtered"
+  ],
+  "linkedDocuments": [
+    "product-brief",
+    "interaction-spec"
+  ]
+}

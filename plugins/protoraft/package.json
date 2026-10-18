@@ -1,0 +1,41 @@
+{
+  "name": "protoraft",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4178",
+    "build:ui": "vite build",
+    "build:server": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/server.mjs --banner:js=\"import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\"",
+    "build": "pnpm build:ui && pnpm build:server",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.4",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@xyflow/react": "12.11.2",
+    "lucide-react": "1.25.0",
+    "mermaid": "11.16.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.9",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.4",
+    "esbuild": "0.27.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.1",
+    "vite-plugin-singlefile": "2.3.3",
+    "vitest": "4.1.10"
+  }
+}

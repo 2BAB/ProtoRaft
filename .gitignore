@@ -1,0 +1,10 @@
+node_modules/
+dist/
+plugins/protoraft/dist/
+.DS_Store
+*.log
+.vite/
+coverage/
+tmp/
+.protoraft-cache/
+.protoraft/requests/

@@ -1,0 +1,20 @@
+{
+  "name": "protoraft-local",
+  "interface": {
+    "displayName": "ProtoRaft Local"
+  },
+  "plugins": [
+    {
+      "name": "protoraft",
+      "source": {
+        "source": "local",
+        "path": "./plugins/protoraft"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
