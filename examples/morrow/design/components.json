@@ -98,6 +98,8 @@
       "states": [
         "paused",
         "playing",
+        "buffering",
+        "dismissed-to-mini",
         "complete"
       ],
       "description": "Shared playback behavior across full and compact surfaces."

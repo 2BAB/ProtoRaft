@@ -39,9 +39,9 @@ stateDiagram-v2
 
 - Play and pause never change layout dimensions.
 - Scrubbing updates elapsed time continuously and commits on release.
-- Closing the full player pauses playback.
-- Returning to Story restores reading position.
-- The mini player appears only after entering from the Listen tab.
+- Closing the full player keeps playback active.
+- Returning to Story restores reading position and shows a persistent mini player.
+- The mini player is available across Today, Story, and Saved.
 
 ## Saved
 
