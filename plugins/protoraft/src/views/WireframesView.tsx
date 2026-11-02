@@ -7,7 +7,7 @@ import {
   Network,
   Plus,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WireframeMap } from "../components/WireframeMap";
 import { WireframeReview } from "../components/WireframeReview";
 import { WorkspaceSubnav } from "../components/WorkspaceSubnav";
@@ -18,6 +18,7 @@ import type {
   PrototypeScreen,
   ScreenId,
   WireframeViewMode,
+  WireframeRequestSummary,
 } from "../types";
 
 interface WireframesViewProps {
@@ -27,8 +28,16 @@ interface WireframesViewProps {
   readOnly: boolean;
   activeWorkspaceView: ProductWorkspaceView;
   onWorkspaceViewChange: (view: ProductWorkspaceView) => void;
-  onGenerate: () => void;
-  onAddDiscussion: (screenId: ScreenId, body: string) => Promise<void>;
+  canGenerate: boolean;
+  requests: WireframeRequestSummary[];
+  requestWarning: string;
+  dispatching: string | null;
+  focusScreen: { id: ScreenId } | null;
+  onResultFocused: () => void;
+  onGenerate: (source: ScreenId) => void;
+  onRetryGeneration: (request: WireframeRequestSummary) => Promise<void>;
+  onOpenResult: (screenId: ScreenId) => Promise<void>;
+  onAddDiscussion: (screenId: ScreenId, body: string, noteId: string) => Promise<void>;
 }
 
 const productWorkspaceItems: Array<{
@@ -59,7 +68,15 @@ export function WireframesView({
   readOnly,
   activeWorkspaceView,
   onWorkspaceViewChange,
+  canGenerate,
+  requests,
+  requestWarning,
+  dispatching,
+  focusScreen,
+  onResultFocused,
   onGenerate,
+  onRetryGeneration,
+  onOpenResult,
   onAddDiscussion,
 }: WireframesViewProps) {
   const [viewMode, setViewMode] = useState<WireframeViewMode>("map");
@@ -69,9 +86,17 @@ export function WireframesView({
     () => screens.find((screen) => screen.id === selectedId) ?? screens[0],
     [screens, selectedId],
   );
+  useEffect(() => {
+    if (focusScreen) {
+      setSelectedId(focusScreen.id);
+      setReviewOpen(true);
+      onResultFocused();
+    }
+  }, [focusScreen, onResultFocused]);
+
   const selectedNotes = useMemo(
-    () => discussions.filter((note) => note.screenId === selectedId),
-    [discussions, selectedId],
+    () => discussions.filter((note) => note.screenId === selectedScreen?.id),
+    [discussions, selectedScreen?.id],
   );
 
   if (!selectedScreen) {
@@ -118,7 +143,9 @@ export function WireframesView({
             <button
               type="button"
               className="button button--primary"
-              onClick={onGenerate}
+              disabled={!canGenerate}
+              title={canGenerate ? "Generate a wireframe from this screen" : "Open the project in Codex to generate wireframes"}
+              onClick={() => onGenerate(selectedScreen.id)}
             >
               <Plus size={16} />
               Generate screen
@@ -126,6 +153,39 @@ export function WireframesView({
           )}
         </div>
       </header>
+
+      {!readOnly && (requests.length > 0 || requestWarning) && (
+        <details className="wireframe-requests" open>
+          <summary>Wireframe requests ({requests.length})</summary>
+          {requestWarning && <p role="status">{requestWarning}</p>}
+          <ul>
+            {requests.map((request) => (
+              <li key={request.id}>
+                <span><strong>{request.title}</strong> <code>{request.id}</code></span>
+                <span role="status">
+                  {{ queued: "Queued", claimed: "Generating", completed: request.availableOnCanvas === false ? "Result unavailable on this branch" : "Ready", failed: "Failed" }[request.status]}
+                  {request.error && ` · ${request.error}`}
+                </span>
+                {request.status === "completed" && request.availableOnCanvas !== false && request.screenId && (
+                  <button type="button" className="button button--secondary" onClick={() => void onOpenResult(request.screenId!)}>
+                    Open result
+                  </button>
+                )}
+                {(request.status === "failed" || request.status === "queued") && (
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    disabled={dispatching !== null}
+                    onClick={() => void onRetryGeneration(request)}
+                  >
+                    {dispatching === request.id ? "Sending…" : request.status === "failed" ? "Retry" : "Send to Codex"}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       <div className={`wireframe-workspace wireframe-workspace--${viewMode}`}>
         <div className="wireframe-main">
@@ -264,7 +324,7 @@ export function WireframesView({
         notes={selectedNotes}
         readOnly={readOnly}
         onClose={() => setReviewOpen(false)}
-        onAddNote={(body) => onAddDiscussion(selectedScreen.id, body)}
+        onAddNote={(body, noteId) => onAddDiscussion(selectedScreen.id, body, noteId)}
       />
     </section>
   );

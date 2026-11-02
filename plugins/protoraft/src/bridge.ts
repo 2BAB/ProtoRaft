@@ -78,7 +78,13 @@ export async function connectProtoRaftApp(
           name,
           arguments: args,
         });
-        return readStructuredContent(result);
+        if (result.isError) {
+          const message = result.content.find((block) => block.type === "text");
+          throw new Error(message?.text ?? `ProtoRaft could not run ${name}.`);
+        }
+        const payload = readStructuredContent(result);
+        if (!payload) throw new Error(`ProtoRaft returned no data for ${name}.`);
+        return payload;
       },
       askAgent: async (message) => {
         const result = await app.sendMessage({

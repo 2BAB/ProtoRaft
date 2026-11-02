@@ -4,7 +4,7 @@ export type DesignWorkspaceView = "system" | "preview";
 export type DisplayMode = "local" | "prod";
 
 export type WireframeViewMode = "map" | "list";
-export type ScreenId = "today" | "story" | "focus" | "listen" | "saved";
+export type ScreenId = string;
 
 export interface PrototypeAction {
   label: string;
@@ -44,6 +44,7 @@ export interface ProductDocument {
   summary: string;
   content: string;
   screenIds: ScreenId[];
+  revision?: string;
   updatedAt: string;
   status: "draft" | "review" | "approved";
 }
@@ -118,6 +119,26 @@ export interface PrototypeProject {
   branches: BranchSnapshot[];
   reviewStatus?: ReviewStatus;
 }
+
+export interface WireframeRequestSummary {
+  id: string;
+  title: string;
+  status: "queued" | "claimed" | "completed" | "failed";
+  screenId?: ScreenId;
+  availableOnCanvas?: boolean;
+  error?: string;
+}
+
+export interface DocumentDraft {
+  content: string;
+  revision?: string;
+  latest?: ProductDocument;
+  error?: string;
+}
+
+export type DocumentWriteResult =
+  | { status: "saved" }
+  | { status: "conflict"; latest: ProductDocument };
 
 export interface ToolProjectPayload {
   project?: PrototypeProject;

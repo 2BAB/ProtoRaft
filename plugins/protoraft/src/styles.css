@@ -5446,3 +5446,45 @@ code {
     text-align: left;
   }
 }
+
+.write-feedback, .write-conflict {
+  color: var(--ink, #171a1a);
+  background: var(--surface-muted, #f4f5f6);
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.write-conflict pre {
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.wireframe-requests {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 6px;
+}
+
+.wireframe-requests ul {
+  list-style: none;
+  max-height: 15rem;
+  overflow: auto;
+  padding: 0;
+  margin: 6px 0 0;
+}
+
+.wireframe-requests li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 6px 0;
+}
+
+.wireframe-requests code {
+  opacity: .7;
+  font-size: .85em;
+}

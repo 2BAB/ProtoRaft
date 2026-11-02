@@ -1,7 +1,10 @@
 import { Sparkles, X } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+
+import { randomHex } from "../client-id";
 
 export interface GenerateScreenRequest {
+  requestId: string;
   title: string;
   purpose: string;
   screenType: string;
@@ -22,10 +25,13 @@ export function GenerateScreenDialog({
   const [purpose, setPurpose] = useState("");
   const [screenType, setScreenType] = useState("Mobile screen");
   const [submitting, setSubmitting] = useState(false);
+  const [failure, setFailure] = useState("");
+  const pendingRequest = useRef<{ id: string; draft: string } | null>(null);
 
   useEffect(() => {
     if (!open) {
       setSubmitting(false);
+      setFailure("");
     }
   }, [open]);
 
@@ -39,18 +45,25 @@ export function GenerateScreenDialog({
       return;
     }
     setSubmitting(true);
-    await onSubmit({
-      title:
-        title.trim() ||
-        purpose.trim().split(/[.!?\n]/)[0]?.slice(0, 60) ||
-        "Untitled screen",
-      purpose: purpose.trim(),
-      screenType,
-    });
-    setTitle("");
-    setPurpose("");
-    setSubmitting(false);
-    onClose();
+    setFailure("");
+    try {
+      const fields = {
+        title: title.trim() || purpose.trim().split(/[.!?\n]/)[0]?.slice(0, 60) || "Untitled screen",
+        purpose: purpose.trim(),
+        screenType,
+      };
+      const draft = JSON.stringify(fields);
+      if (pendingRequest.current?.draft !== draft) pendingRequest.current = { id: `req_${randomHex(6)}`, draft };
+      await onSubmit({ ...fields, requestId: pendingRequest.current.id });
+      pendingRequest.current = null;
+      setTitle("");
+      setPurpose("");
+      onClose();
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Could not queue the wireframe.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -117,6 +130,7 @@ export function GenerateScreenDialog({
               </select>
             </label>
           </div>
+          {failure && <p className="write-feedback" role="alert">{failure}</p>}
           <footer>
             <button
               type="button"

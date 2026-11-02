@@ -306,6 +306,7 @@ describe("ProjectStore", () => {
     );
 
     expect(first.previousRevision).toBe(hashContent(original));
+    await expect(store.saveDocument(session.id, "documents/brief.md", "Missing revision")).rejects.toThrow("revision is required");
     await expect(
       store.saveDocument(
         session.id,
@@ -344,6 +345,109 @@ describe("ProjectStore", () => {
         expectedRevision: project.discussionRevision,
       }),
     ).rejects.toThrow("REVISION_CONFLICT");
+  });
+
+  it("serializes revision checks across stores and keeps both notes after retry", async () => {
+    const left = new ProjectStore();
+    const right = new ProjectStore();
+    const session = await left.open(root);
+    await right.open(root);
+    const original = await left.loadProject(session.id);
+    const docRevision = original.documents[0]!.revision;
+    const noteRevision = original.discussionRevision;
+    const noteA = { screenId: "today", body: "First note", noteId: `note_${"a".repeat(32)}` };
+    const noteB = { screenId: "today", body: "Second note", noteId: `note_${"b".repeat(32)}` };
+
+    const docs = await Promise.allSettled([
+      left.saveDocument(session.id, "documents/brief.md", "First edit", docRevision),
+      right.saveDocument(session.id, "documents/brief.md", "Second edit", docRevision),
+    ]);
+    expect(docs.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(docs.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ message: expect.stringContaining("REVISION_CONFLICT") }),
+    });
+    const firstDocWon = docs[0]?.status === "fulfilled";
+    expect(await readFile(join(root, "documents/brief.md"), "utf8"))
+      .toBe(firstDocWon ? "First edit" : "Second edit");
+
+    const notes = await Promise.allSettled([
+      left.addDiscussionNote(session.id, { ...noteA, expectedRevision: noteRevision }),
+      right.addDiscussionNote(session.id, { ...noteB, expectedRevision: noteRevision }),
+    ]);
+    expect(notes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(notes.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ message: expect.stringContaining("REVISION_CONFLICT") }),
+    });
+    const pending = notes[0]?.status === "fulfilled" ? noteB : noteA;
+    const refreshed = await right.loadProject(session.id);
+    const retried = await right.addDiscussionNote(session.id, { ...pending, expectedRevision: refreshed.discussionRevision });
+    const duplicate = await left.addDiscussionNote(session.id, { ...pending, expectedRevision: noteRevision });
+    expect(duplicate.note).toEqual(retried.note);
+    expect((await left.loadProject(session.id)).discussions.map((note) => note.body).sort())
+      .toEqual(["First note", "Second note"]);
+  });
+
+  it("registers and connects a generated screen before reporting it complete", async () => {
+    const store = new ProjectStore();
+    const { id } = await store.open(root);
+    const input = { title: "Playback speed", purpose: "Choose the playback speed.", screenType: "Overlay state", sourceScreenId: "today" };
+    const queued = await store.createWireframeRequest(id, input);
+    const other = await store.createWireframeRequest(id, input);
+    expect(queued.id).not.toBe(other.id);
+    const retriedSubmission = await store.createWireframeRequest(id, { ...input, requestId: queued.id });
+    expect(retriedSubmission.id).toBe(queued.id);
+    expect(await store.listWireframeRequests(id)).toHaveLength(2);
+    const firstClaim = await store.claimWireframeRequest(id, queued.id, "agent-a");
+    const otherClaim = await store.claimWireframeRequest(id, other.id, "agent-b");
+    expect(otherClaim.id).toBe(other.id);
+
+    const screen = "screens/speed";
+    await mkdir(join(root, screen));
+    await writeFile(join(root, screen, "screen.json"), JSON.stringify({
+      id: "speed", title: input.title, purpose: input.purpose, route: "/speed", wireframe: "wireframe.png",
+    }));
+    const damagedPng = Buffer.from(pixelPng);
+    damagedPng[47] = damagedPng[47]! ^ 0xff;
+    await writeFile(join(root, screen, "wireframe.png"), damagedPng);
+    const output = {
+      claimToken: firstClaim.claimToken!, screenId: "speed",
+      screenDefinitionPath: `${screen}/screen.json`, wireframePath: `${screen}/wireframe.png`,
+    };
+    await expect(store.completeWireframeRequest(id, queued.id, output)).rejects.toThrow("PNG");
+    expect((await store.loadProject(id)).screens.map((item) => item.id)).toEqual(["today"]);
+    await store.failWireframeRequest(id, queued.id, firstClaim.claimToken!, "Image could not be generated.");
+    const reopened = new ProjectStore();
+    await reopened.open(root);
+    expect(await reopened.listWireframeRequests(id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: queued.id, status: "failed" }),
+      expect.objectContaining({ id: other.id, status: "claimed" }),
+    ]));
+    await reopened.retryWireframeRequest(id, queued.id);
+    const finalClaim = await reopened.claimWireframeRequest(id, queued.id, "agent-c");
+    await writeFile(join(root, screen, "wireframe.png"), pixelPng);
+    await expect(reopened.completeWireframeRequest(id, queued.id, output)).rejects.toThrow("token");
+    expect((await reopened.completeWireframeRequest(id, queued.id, {
+      ...output, claimToken: finalClaim.claimToken!,
+    })).status).toBe("completed");
+    const project = await store.loadProject(id);
+    expect(project.screens.map((item) => item.id)).toEqual(["today", "speed"]);
+    expect(project.connections).toContainEqual(expect.objectContaining({ source: "today", target: "speed" }));
+    const requests = await store.listWireframeRequests(id);
+    expect(requests.find((item) => item.id === queued.id)).toMatchObject({ status: "completed", availableOnCanvas: true, screenId: "speed" });
+    expect(requests.every((item) => !("claimToken" in item))).toBe(true);
+  });
+
+  it("shows expired claims as failed and recovers the same request ID", async () => {
+    const store = new ProjectStore();
+    const { id } = await store.open(root);
+    const queued = await store.createWireframeRequest(id, { title: "Search", purpose: "Find a story.", screenType: "Desktop screen" });
+    const claimed = await store.claimWireframeRequest(id, queued.id, "stopped-agent");
+    await writeFile(
+      join(root, ".protoraft/requests", `${queued.id}.json`),
+      JSON.stringify({ ...claimed, updatedAt: "2020-01-01T00:00:00.000Z" }),
+    );
+    expect((await store.listWireframeRequests(id))[0]).toMatchObject({ id: queued.id, status: "failed" });
+    expect(await store.retryWireframeRequest(id, queued.id)).toMatchObject({ id: queued.id, status: "queued" });
   });
 
   it("rejects traversal and symlinks that escape the project", async () => {

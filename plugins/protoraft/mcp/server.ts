@@ -334,7 +334,7 @@ function createServer() {
         projectId: z.string().min(1),
         path: z.string().min(1),
         content: z.string(),
-        expectedRevision: z.string().optional(),
+        expectedRevision: z.string().min(1),
       },
       annotations: {
         readOnlyHint: false,
@@ -379,6 +379,7 @@ function createServer() {
         body: z.string().min(1).max(2000),
         author: z.string().min(1).max(120).optional(),
         expectedRevision: z.string().optional(),
+        noteId: z.string().regex(/^note_[a-f0-9]{32}$/).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -399,6 +400,7 @@ function createServer() {
       body,
       author,
       expectedRevision,
+      noteId,
     }) =>
       trackDiagnostic(
         "mcp",
@@ -410,6 +412,7 @@ function createServer() {
             body,
             author,
             expectedRevision,
+            noteId,
           });
           return result(
             { saved },
@@ -431,6 +434,8 @@ function createServer() {
         title: z.string().min(1).max(120),
         purpose: z.string().min(1).max(2000),
         screenType: z.string().min(1).max(80),
+        sourceScreenId: z.string().min(1).max(100).optional(),
+        requestId: z.string().regex(/^req_[a-f0-9]{12}$/).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -445,7 +450,7 @@ function createServer() {
         },
       },
     },
-    async ({ projectId, title, purpose, screenType }) =>
+    async ({ projectId, title, purpose, screenType, sourceScreenId, requestId }) =>
       trackDiagnostic(
         "mcp",
         "tool.create-wireframe-request",
@@ -455,6 +460,8 @@ function createServer() {
             title,
             purpose,
             screenType,
+            sourceScreenId,
+            requestId,
           });
           return result(
             { request },
@@ -462,6 +469,60 @@ function createServer() {
           );
         },
       ),
+  );
+
+  registerAppTool(
+    server,
+    "list_wireframe_requests",
+    {
+      title: "List wireframe requests",
+      description: "Read generation progress and completed screen IDs without exposing claim tokens.",
+      inputSchema: { projectId: z.string().min(1) },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app", "model"] } },
+    },
+    async ({ projectId }) => {
+      const requests = await store.listWireframeRequests(projectId);
+      return result({ requests }, `Loaded ${requests.length} wireframe requests.`);
+    },
+  );
+
+  registerAppTool(
+    server,
+    "retry_wireframe_request",
+    {
+      title: "Retry wireframe generation",
+      description: "Return a failed or timed-out wireframe to the queue.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        requestId: z.string().regex(/^req_[a-f0-9]{12}$/),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId, requestId }) => {
+      const request = await store.retryWireframeRequest(projectId, requestId);
+      return result({ request }, `Queued ${request.id} for retry.`);
+    },
+  );
+
+  server.registerTool(
+    "fail_wireframe_request",
+    {
+      title: "Report failed wireframe generation",
+      description: "Keep a failed generation visible in the workbench and let the user retry.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        requestId: z.string().regex(/^req_[a-f0-9]{12}$/),
+        claimToken: z.string().regex(/^claim_[a-f0-9]{20}$/),
+        error: z.string().min(1).max(500),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+    },
+    async ({ projectId, requestId, claimToken, error }) => {
+      const request = await store.failWireframeRequest(projectId, requestId, claimToken, error);
+      return result({ request }, `Recorded failure for ${request.id}.`);
+    },
   );
 
   server.registerTool(
@@ -493,8 +554,19 @@ function createServer() {
             requestId,
             agentName,
           );
+          const rootPath = store.get(projectId).root;
+          const screenId = `screen-${requestId.slice(4)}-${request.claimToken!.slice(-6)}`;
+          const screenDirectory = `screens/${screenId}`;
           return result(
-            { request },
+            {
+              request,
+              rootPath,
+              output: {
+                screenId,
+                screenDefinitionPath: `${screenDirectory}/screen.json`,
+                wireframePath: `${screenDirectory}/wireframe.png`,
+              },
+            },
             `Claimed ${request.id}. Use claim token ${request.claimToken} when completing it.`,
           );
         },
@@ -506,7 +578,7 @@ function createServer() {
     {
       title: "Complete wireframe request",
       description:
-        "Complete a claimed request after its atomic image and screen definition exist inside the project.",
+        "Validate a generated PNG and its screen definition, place the screen on the project canvas, and complete the request.",
       inputSchema: {
         projectId: z.string().min(1),
         requestId: z.string().regex(/^req_[a-f0-9]{12}$/),
