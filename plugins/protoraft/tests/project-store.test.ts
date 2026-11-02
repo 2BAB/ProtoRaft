@@ -626,4 +626,58 @@ describe("ProjectStore", () => {
       )?.recommendation,
     ).toBe("Keep the feature intent with the main wording.");
   }, 10_000);
+
+  it("keeps project-relative paths for a project in a subdirectory and excludes root and sibling changes", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "protoraft-subdir-"));
+    try {
+      const projectRoot = join(repo, "examples/morrow");
+      await mkdir(projectRoot, { recursive: true });
+      await createFixture(projectRoot);
+
+      const git = (...args: string[]) =>
+        execFileSync("git", args, { cwd: repo });
+      await writeFile(join(repo, "README.md"), "# workspace\n");
+      await mkdir(join(repo, "examples/other"), { recursive: true });
+      await writeFile(join(repo, "examples/other/note.md"), "# other project\n");
+      git("init", "-b", "main");
+      git("config", "user.name", "ProtoRaft Test");
+      git("config", "user.email", "test@example.com");
+      git("add", ".");
+      git("commit", "-m", "fixture");
+
+      git("checkout", "-b", "feature/subdir");
+      await writeFile(
+        join(projectRoot, "documents/brief.md"),
+        "# Fixture\n\nSubdir change.\n",
+      );
+      await writeFile(join(repo, "README.md"), "# workspace changed\n");
+      await writeFile(
+        join(repo, "examples/other/note.md"),
+        "# other project changed\n",
+      );
+      git("add", ".");
+      git("commit", "-m", "mixed change");
+      git("checkout", "main");
+
+      const store = new ProjectStore();
+      const session = await store.open(projectRoot);
+      const comparison = await store.compareBranches(
+        session.id,
+        "main",
+        "feature/subdir",
+        false,
+      );
+      const paths = comparison.changedFiles.map((change) => change.path);
+
+      expect(comparison.changedFiles).toEqual([
+        { path: "documents/brief.md", kind: "modified" },
+      ]);
+      // repo-root change is excluded
+      expect(paths).not.toContain("README.md");
+      // sibling directory change is excluded
+      expect(paths).not.toContain("examples/other/note.md");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

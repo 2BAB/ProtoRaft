@@ -1254,7 +1254,7 @@ export class ProjectStore {
     await this.git(session, ["rev-parse", "--verify", `${compare}^{commit}`]);
     const mergeBase = await this.git(session, ["merge-base", base, compare]);
     const prefix = await this.projectGitPrefix(session);
-    const pathSpec = prefix || ".";
+    const pathSpec = ".";
     const nameStatus = await this.git(session, [
       "diff",
       "--name-status",
