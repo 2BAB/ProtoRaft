@@ -24,6 +24,7 @@ interface DocumentsViewProps {
   activeWorkspaceView: ProductWorkspaceView;
   onWorkspaceViewChange: (view: ProductWorkspaceView) => void;
   temporary: boolean;
+  assets: Record<string, string>;
   drafts: Record<string, DocumentDraft>;
   setDrafts: Dispatch<SetStateAction<Record<string, DocumentDraft>>>;
   onSave: (id: string, content: string, revision?: string) => Promise<DocumentWriteResult>;
@@ -44,6 +45,7 @@ export function DocumentsView({
   activeWorkspaceView,
   onWorkspaceViewChange,
   temporary,
+  assets,
   drafts,
   setDrafts,
   onSave,
@@ -242,7 +244,13 @@ export function DocumentsView({
           )}
           {mode === "preview" ? (
             <div className="document-scroll">
-              <MarkdownDocument content={draft} />
+              <MarkdownDocument
+                content={draft}
+                filename={selectedDocument.filename}
+                assets={assets}
+                documents={documents}
+                onOpenDocument={setSelectedId}
+              />
             </div>
           ) : (
             <textarea

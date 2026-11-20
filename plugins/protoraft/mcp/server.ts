@@ -255,13 +255,36 @@ function createServer() {
 
   registerAppTool(
     server,
+    "list_protoraft_publication_sources",
+    {
+      title: "List shareable Git snapshots",
+      description: "Find the exact commits available for Production and branch review.",
+      inputSchema: { projectId: z.string().min(1) },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId }) => {
+      const sources = await store.listPublicationSources(projectId);
+      return result({ sources }, `Found ${sources.length} shareable Git snapshots.`);
+    },
+  );
+
+  registerAppTool(
+    server,
     "prepare_protoraft_site",
     {
       title: "Prepare ProtoRaft review site",
       description:
-        "Create a temporary Codex Sites source package containing the current project's read-only default-branch Production view.",
+        "Prepare a read-only Codex Sites snapshot from a pinned Production or branch-review commit.",
       inputSchema: {
         projectId: z.string().min(1),
+        source: z.object({
+          kind: z.enum(["production", "branch-review"]),
+          branch: z.string().min(1),
+          commit: z.string().regex(/^[a-f0-9]{40,64}$/),
+          baseBranch: z.string().min(1).optional(),
+          baseCommit: z.string().regex(/^[a-f0-9]{40,64}$/).optional(),
+        }).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -276,7 +299,7 @@ function createServer() {
         },
       },
     },
-    async ({ projectId }) =>
+    async ({ projectId, source }) =>
       trackDiagnostic(
         "mcp",
         "tool.prepare-site",
@@ -285,11 +308,12 @@ function createServer() {
           const site = await prepareSiteExport({
             store,
             projectId,
+            source,
             uiTemplatePath: join(DIST_DIRECTORY, "index.html"),
           });
           return result(
             { site },
-            `Prepared the ${site.branch} Production site for ${site.projectName}.`,
+            `Prepared ${site.projectName} from ${site.branch} at ${site.commit.slice(0, 7)}.`,
           );
         },
       ),
@@ -627,6 +651,49 @@ function createServer() {
 
   registerAppTool(
     server,
+    "get_protoraft_branch_images",
+    {
+      title: "Read wireframe images from compared commits",
+      description: "Load the two committed versions of a changed image.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        base: z.string().regex(/^[a-f0-9]{40,64}$/),
+        compare: z.string().regex(/^[a-f0-9]{40,64}$/),
+        path: z.string().min(1),
+        previousPath: z.string().min(1).optional(),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId, base, compare, path, previousPath }) =>
+      result(await store.readBranchImages(projectId, base, compare, path, previousPath), "Loaded committed wireframe images."),
+  );
+
+  registerAppTool(
+    server,
+    "save_protoraft_review_decision",
+    {
+      title: "Save a product decision for branch review",
+      description: "Record the decision against a declared review artifact in the local Git working tree.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        base: z.string().min(1),
+        compare: z.string().min(1),
+        path: z.string().min(1),
+        decision: z.string().trim().min(1).max(2000),
+        expectedRevision: z.string().min(1),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId, ...input }) => {
+      const saved = await store.saveReviewDecision(projectId, input);
+      return result({ saved }, "Saved the product decision to the review scenario.");
+    },
+  );
+
+  registerAppTool(
+    server,
     "compare_protoraft_branches",
     {
       title: "Compare ProtoRaft branches",
@@ -637,6 +704,7 @@ function createServer() {
         base: z.string().min(1),
         compare: z.string().min(1),
         scanConflicts: z.boolean().default(true),
+        includeReview: z.boolean().default(false),
       },
       annotations: {
         readOnlyHint: true,
@@ -649,7 +717,7 @@ function createServer() {
         },
       },
     },
-    async ({ projectId, base, compare, scanConflicts }) =>
+    async ({ projectId, base, compare, scanConflicts, includeReview }) =>
       trackDiagnostic(
         "mcp",
         "tool.compare-branches",
@@ -661,8 +729,9 @@ function createServer() {
             compare,
             scanConflicts,
           );
+          const branches = includeReview ? await store.loadBranchReview(projectId, base, compare) : undefined;
           return result(
-            { comparison },
+            { comparison, branches },
             `Compared ${comparison.base} with ${comparison.compare}: ${comparison.changedFiles.length} changed files and ${comparison.possibleConflicts.length} possible conflicts.`,
           );
         },

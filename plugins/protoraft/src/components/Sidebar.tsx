@@ -11,6 +11,7 @@ interface SidebarProps {
   displayMode: DisplayMode;
   reviewAttention: boolean;
   showSettings: boolean;
+  showSharedReview: boolean;
   onSectionChange: (section: WorkspaceSection) => void;
   onOpenSettings: () => void;
 }
@@ -34,11 +35,12 @@ export function Sidebar({
   displayMode,
   reviewAttention,
   showSettings,
+  showSharedReview,
   onSectionChange,
   onOpenSettings,
 }: SidebarProps) {
   const visibleNavigation =
-    displayMode === "prod"
+    displayMode === "prod" && !showSharedReview
       ? navigation.filter((item) => item.id !== "collaboration")
       : navigation;
 

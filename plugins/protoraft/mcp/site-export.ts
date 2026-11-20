@@ -7,6 +7,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import type { PublicationSource } from "../src/types";
 import type { ProjectStore } from "./project-store";
 
 const execFileAsync = promisify(execFile);
@@ -18,6 +19,7 @@ interface PrepareSiteExportOptions {
   >;
   projectId: string;
   uiTemplatePath: string;
+  source?: PublicationSource;
 }
 
 function scriptJson(value: unknown) {
@@ -59,6 +61,9 @@ const worker = [
   "    if (request.method !== 'GET' && request.method !== 'HEAD') {",
   "      return new Response('Method not allowed', { status: 405 });",
   "    }",
+  "    if (!['/', '/index.html'].includes(new URL(request.url).pathname)) {",
+  "      return new Response('Not found', { status: 404 });",
+  "    }",
   "    return new Response(request.method === 'HEAD' ? null : html, {",
   "      headers: {",
   "        'content-type': 'text/html; charset=utf-8',",
@@ -77,8 +82,9 @@ export async function prepareSiteExport({
   store,
   projectId,
   uiTemplatePath,
+  source,
 }: PrepareSiteExportOptions) {
-  const project = await store.loadProductionProject(projectId);
+  const project = await store.loadProductionProject(projectId, source);
   const template = await readFile(uiTemplatePath, "utf8");
   if (!template.includes("<head>")) {
     throw new Error("ProtoRaft UI template has no head element.");
@@ -91,12 +97,13 @@ export async function prepareSiteExport({
   };
   const html = template.replace(
     "<head>",
-    `<head><script>window.__PROTORAFT_BOOTSTRAP__=${scriptJson(bootstrap)};</script>`,
+    () => `<head><script>window.__PROTORAFT_BOOTSTRAP__=${scriptJson(bootstrap)};</script>`,
   );
-  const sourceDirectory = await store.siteSourceDirectory(projectId);
+  const sourceDirectory = await store.siteSourceDirectory(projectId, project.publication);
   await mkdir(join(sourceDirectory, ".openai"), { recursive: true });
   await writeFile(join(sourceDirectory, "index.html"), html);
   await writeFile(join(sourceDirectory, "build.mjs"), buildScript);
+  await writeFile(join(sourceDirectory, "snapshot.json"), `${JSON.stringify(project.publication, null, 2)}\n`);
   await writeFile(
     join(sourceDirectory, "package.json"),
     `${JSON.stringify(
@@ -134,7 +141,9 @@ export async function prepareSiteExport({
   return {
     sourceDirectory,
     projectName: project.name,
-    branch: project.defaultBranch,
+    branch: project.publication.branch,
+    commit: project.publication.commit,
+    kind: project.publication.kind,
     displayMode: "prod" as const,
   };
 }

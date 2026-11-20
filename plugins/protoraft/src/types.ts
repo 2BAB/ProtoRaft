@@ -27,6 +27,7 @@ export interface PrototypeScreen {
   actions: PrototypeAction[];
   states: string[];
   linkedDocumentIds: string[];
+  assetPath?: string;
   updatedAt: string;
 }
 
@@ -83,6 +84,13 @@ export interface BranchChange {
   baseContent?: string;
   compareContent?: string;
   recommendation?: string;
+  resolutionCriteria?: string[];
+  decision?: string;
+  decisionRequired?: boolean;
+  baseImage?: string;
+  image?: boolean;
+  previousPath?: string;
+  compareImage?: string;
 }
 
 export interface BranchSnapshot {
@@ -91,8 +99,11 @@ export interface BranchSnapshot {
   label: string;
   author: string;
   commit: string;
+  fullCommit?: string;
   updatedAt: string;
   changes: BranchChange[];
+  reviewTitle?: string;
+  decisionRevision?: string;
 }
 
 export interface ReviewStatus {
@@ -100,6 +111,14 @@ export interface ReviewStatus {
   checkedAt?: string;
   summary?: string;
   changedArtifacts?: number;
+}
+
+export interface PublicationSource {
+  kind: "production" | "branch-review";
+  branch: string;
+  commit: string;
+  baseBranch?: string;
+  baseCommit?: string;
 }
 
 export interface PrototypeProject {
@@ -118,6 +137,9 @@ export interface PrototypeProject {
   components: ComponentContract[];
   branches: BranchSnapshot[];
   reviewStatus?: ReviewStatus;
+  documentAssetPaths?: string[];
+  documentAssets?: Record<string, string>;
+  publication?: PublicationSource;
 }
 
 export interface WireframeRequestSummary {

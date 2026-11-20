@@ -294,6 +294,66 @@ describe("ProjectStore", () => {
     }
   }, 10_000);
 
+  it("keeps fast-forward product decisions visible and exports the exact branch snapshot", async () => {
+    execFileSync("git", ["init", "-b", "main"], { cwd: root });
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
+    git("config", "user.name", "ProtoRaft Test");
+    git("config", "user.email", "test@example.com");
+    git("add", ".");
+    git("commit", "-m", "base");
+    const baseCommit = git("rev-parse", "HEAD");
+    git("switch", "-c", "feature/listen");
+    await writeFile(join(root, "documents/brief.md"), [
+      "# Feature",
+      "Keep playback running. Preserve literal $&.",
+      "![diagram][diagram]",
+      "",
+      "[diagram]: ../design/diagram.png",
+    ].join("\n"));
+    await writeFile(join(root, "design/diagram.png"), pixelPng);
+    git("add", ".");
+    git("commit", "-m", "proposal");
+
+    const store = new ProjectStore();
+    const { id } = await store.open(root);
+    const changed = await store.compareBranches(id, "main", "feature/listen");
+    expect(changed.possibleConflicts).toEqual([]);
+    const [, review] = await store.loadBranchReview(id, "main", "feature/listen");
+    expect(review?.changes.find((change) => change.path === "documents/brief.md")).toMatchObject({
+      kind: "modified", decisionRequired: true,
+      baseContent: expect.stringContaining("Original."),
+      compareContent: expect.stringContaining("Keep playback running."),
+    });
+    const decision = "Keep playback running on Story and Saved.";
+    const saved = await store.saveReviewDecision(id, {
+      base: "main", compare: "feature/listen", path: "documents/brief.md",
+      decision, expectedRevision: review!.decisionRevision!,
+    });
+    const [, updated] = await store.loadBranchReview(id, "main", "feature/listen");
+    expect(updated?.changes.find((change) => change.path === "documents/brief.md")?.decision).toBe(saved.decision);
+
+    const [, stale] = await store.listPublicationSources(id);
+    git("add", "collaboration/review-scenarios.json");
+    git("commit", "-m", "record decision");
+    await expect(store.loadProductionProject(id, stale)).rejects.toThrow("source branch changed");
+    const [production, branchReview] = await store.listPublicationSources(id);
+    expect(production?.commit).toBe(baseCommit);
+    expect(branchReview).toMatchObject({ kind: "branch-review", commit: git("rev-parse", "HEAD"), baseCommit });
+
+    await writeFile(join(root, "documents/brief.md"), "Uncommitted private material");
+    const template = join(root, "ui-template.html");
+    await writeFile(template, "<!doctype html><html><head></head><body></body></html>");
+    const exported = await prepareSiteExport({ store, projectId: id, uiTemplatePath: template, source: branchReview });
+    const html = await readFile(join(exported.sourceDirectory, "dist/static/index.html"), "utf8");
+    expect(exported).toMatchObject({ branch: "feature/listen", commit: branchReview?.commit });
+    expect(html).toContain(decision);
+    expect(html).toContain("Preserve literal $&.");
+    expect(html).not.toContain("Uncommitted private material");
+    expect(html).toContain('"design/diagram.png":"data:image/png;base64,');
+    expect(html).toContain('"assetPath":"screens/today/wireframe.png"');
+    expect(JSON.parse(await readFile(join(exported.sourceDirectory, "snapshot.json"), "utf8"))).toEqual(branchReview);
+  }, 10_000);
+
   it("limits writes to declared documents and detects revision conflicts", async () => {
     const store = new ProjectStore();
     const session = await store.open(root);

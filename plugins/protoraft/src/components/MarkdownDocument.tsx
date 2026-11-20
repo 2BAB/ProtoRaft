@@ -1,3 +1,4 @@
+import { markdownProjectPath } from "../markdown-path";
 import mermaid from "mermaid";
 import { useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -62,7 +63,19 @@ function MermaidDiagram({ chart }: { chart: string }) {
   );
 }
 
-export function MarkdownDocument({ content }: { content: string }) {
+export function MarkdownDocument({
+  content,
+  filename,
+  assets,
+  documents,
+  onOpenDocument,
+}: {
+  content: string;
+  filename: string;
+  assets: Record<string, string>;
+  documents: Array<{ id: string; filename: string }>;
+  onOpenDocument: (id: string) => void;
+}) {
   return (
     <article className="markdown-document">
       <ReactMarkdown
@@ -81,12 +94,25 @@ export function MarkdownDocument({ content }: { content: string }) {
               </code>
             );
           },
-          a({ children, ...props }) {
-            return (
-              <a {...props} target="_blank" rel="noreferrer">
-                {children}
-              </a>
-            );
+          img({ src, alt, title }) {
+            const path = src ? markdownProjectPath(filename, src) : null;
+            if (path && !assets[path]) return <span className="image-unavailable">{alt || path} (image unavailable)</span>;
+            return <img src={path ? assets[path] : src} alt={alt ?? ""} title={title} />;
+          },
+          a({ children, href, title }) {
+            const path = href ? markdownProjectPath(filename, href) : null;
+            const document = path && documents.find((item) => item.filename === path);
+            if (document) {
+              return <a href={href} title={title} onClick={(event) => {
+                event.preventDefault();
+                onOpenDocument(document.id);
+              }}>{children}</a>;
+            }
+            if (path && assets[path]) {
+              return <a href={assets[path]} download={path.split("/").at(-1)} title={title}>{children}</a>;
+            }
+            if (path) return <span title="This file is unavailable in this view">{children}</span>;
+            return <a href={href} title={title} target={href?.startsWith("#") ? undefined : "_blank"} rel="noreferrer">{children}</a>;
           },
         }}
       >
