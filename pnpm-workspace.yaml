@@ -1,3 +1,7 @@
 packages:
   - "plugins/*"
 
+
+overrides:
+  browserslist: "^4.28.7"
+  baseline-browser-mapping: "^2.11.0"

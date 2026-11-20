@@ -22,6 +22,7 @@ let browserConnection;
 let pageConnection;
 let targetId;
 let server;
+const pageErrors = [];
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
@@ -37,7 +38,7 @@ async function connectMcp() {
   return client;
 }
 
-async function connectCdp(url) {
+async function connectCdp(url, onEvent) {
   const socket = new WebSocket(url);
   await new Promise((ok, fail) => {
     socket.addEventListener("open", ok, { once: true });
@@ -48,6 +49,8 @@ async function connectCdp(url) {
   socket.addEventListener("message", ({ data }) => {
     const response = JSON.parse(data);
     pending.get(response.id)?.(response);
+    if (response.method) onEvent?.(response);
+
   });
   return {
     disconnect() { socket.close(); },
@@ -162,7 +165,13 @@ try {
   const targets = await (await fetch(`${endpoint}/json/list`)).json();
   const target = targets.find((entry) => entry.id === targetId);
   assert.ok(target, "Locate the exact target created for this test");
-  pageConnection = await connectCdp(target.webSocketDebuggerUrl);
+  pageConnection = await connectCdp(target.webSocketDebuggerUrl, ({ method, params }) => {
+    if (method === "Runtime.exceptionThrown") {
+      const details = params.exceptionDetails;
+      pageErrors.push(details.exception?.description ?? details.text);
+    }
+  });
+  await pageConnection.send("Runtime.enable");
   const evaluate = async (fn, ...args) => {
     const { result, exceptionDetails } = await pageConnection.send("Runtime.evaluate", {
       expression: `(${fn})(...${JSON.stringify(args)})`, awaitPromise: true, returnByValue: true,
@@ -177,7 +186,9 @@ try {
         const value = await evaluate(fn, ...args);
         if (value) return value;
       } catch (error) {
-        if (!/context/i.test(error.message)) throw error;
+        if (!/context/i.test(error.message)) {
+          throw new Error(`Could not verify ${label}: ${error.message}`, { cause: error });
+        }
       }
       await delay(100);
     }
@@ -447,6 +458,9 @@ try {
   await pageConnection.send("Page.reload");
   await wait("desktop Morrow preview", () => Boolean(document.querySelector(".direct-preview button")));
   console.log("PASS standalone Morrow preview on mobile and desktop");
+} catch (error) {
+  for (const message of pageErrors) console.error("Browser error:", message);
+  throw error;
 } finally {
   try {
     if (targetId) await browserConnection.send("Target.closeTarget", { targetId });
