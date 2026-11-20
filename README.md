@@ -6,8 +6,12 @@ reviews happen through regular branches and pull requests instead of a separate
 tool.
 
 To see the v1.1 workflow end to end, start with the bundled
-[Morrow sample](examples/morrow). Feel free to fork this repo and swap in your
-own Skills, project structure, or review steps.
+[Morrow sample](examples/morrow).
+
+![Morrow's five connected wireframes in the ProtoRaft workbench](docs/images/morrow-workbench.png)
+
+Feel free to fork this repo and swap in your own Skills, project structure, or
+review steps.
 
 ## How it works
 
