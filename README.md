@@ -4,8 +4,7 @@ ProtoRaft is a simple, versatile, open-source Codex plugin for product design.
 It keeps wireframes, discussion notes, and product specs together in Git so
 teammates can see what changed, why it changed, and what to build next.
 
-The [Morrow sample](https://github.com/2BAB/ProtoRaft-Sample) shows the v1.1
-workflow.
+The [Morrow sample](examples/morrow) shows the v1.1 workflow.
 
 ## Work with Codex
 
@@ -37,9 +36,8 @@ write to a repository, send requests to Codex, schedule checks, or publish a sit
 - Git
 - An existing repository containing `protoraft.project.json`
 
-For the first installed-plugin test, use
-[ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample). ProtoRaft v1.1
-does not initialize an arbitrary repository yet.
+Open `examples/morrow` for a project with an existing manifest and a sample review
+branch.
 
 Image generation requires ImageGen in the active Codex environment. Publishing
 requires Codex Sites. Native handoff requires a confirmed Android or iOS target
@@ -49,7 +47,7 @@ tasks to be enabled in the Codex desktop app.
 ## Run the standalone preview
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -60,17 +58,17 @@ mobile prototype.
 ## Verify the plugin package
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm verify
 ```
 
 `pnpm verify` type-checks the app, runs the MCP and project-store tests, creates
 the single-file MCP App and bundled stdio server, then validates the plugin
-manifest and every Skill. It requires a local Codex installation because the
-official plugin and Skill validators ship with Codex.
+manifest, Skill metadata, and packaged files. The build generates third-party
+license notices in `plugins/protoraft/dist`.
 
 After building, run the MCP App browser regression against a disposable clone of
-the official sample. The script starts its own local host, uses a background tab
+a standalone checkout of the Morrow sample. The script starts its own local host, uses a background tab
 on the configured Chromium CDP endpoint, and removes the clone and tab when it
 finishes. An optional final argument supplies a generated PNG instead of the
 sample image.
@@ -161,9 +159,10 @@ duplicating their instructions.
 ## Repository layout
 
 - `plugins/protoraft/`: Codex plugin, Skills, MCP server, and workbench UI.
-- [ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample): Official Morrow
-  sample with five connected screens and a reviewable Git branch scenario.
-- `CONTRIBUTING.md`: contribution, licensing, and verification rules.
+- [`examples/morrow/`](examples/morrow): Morrow sample source, wireframes, and a
+  Git branch review scenario.
+- [Contributing](CONTRIBUTING.md): local setup, testing, and contributions.
+- [Changelog](CHANGELOG.md) and [security reporting](SECURITY.md).
 
 ## License
 

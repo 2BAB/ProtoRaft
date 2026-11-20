@@ -1,14 +1,28 @@
 import { execFileSync } from "node:child_process";
-import { access, readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const errors = [];
 
+async function localFile(path) {
+  if (typeof path !== "string" || !path || isAbsolute(path)) {
+    throw new Error("expected a project-relative path");
+  }
+  const projectRoot = await realpath(root);
+  const file = await realpath(resolve(projectRoot, path));
+  const location = relative(projectRoot, file);
+  if (location.startsWith("..") || isAbsolute(location)) {
+    throw new Error("path leaves the sample directory");
+  }
+  if (!(await stat(file)).isFile()) throw new Error("expected a file");
+  return file;
+}
+
 async function readJson(path) {
   try {
-    return JSON.parse(await readFile(join(root, path), "utf8"));
+    return JSON.parse(await readFile(await localFile(path), "utf8"));
   } catch (error) {
     errors.push(`${path}: ${error.message}`);
     return null;
@@ -17,13 +31,41 @@ async function readJson(path) {
 
 async function requireFile(path, minimumBytes = 1) {
   try {
-    await access(join(root, path));
-    const file = await stat(join(root, path));
-    if (!file.isFile() || file.size < minimumBytes) {
-      errors.push(`${path}: expected a file of at least ${minimumBytes} bytes`);
+    const file = await localFile(path);
+    if ((await stat(file)).size < minimumBytes) {
+      throw new Error(`expected a file of at least ${minimumBytes} bytes`);
     }
-  } catch {
-    errors.push(`${path}: missing`);
+    return file;
+  } catch (error) {
+    errors.push(`${path}: ${error.message}`);
+    return null;
+  }
+}
+
+async function requirePng(path) {
+  const file = await requireFile(path, 10_000);
+  if (!file) return;
+
+  const bytes = await readFile(file);
+  const expected = Buffer.from("89504e470d0a1a0a", "hex");
+  if (!bytes.subarray(0, 8).equals(expected) ||
+      bytes.toString("ascii", 12, 16) !== "IHDR" ||
+      !bytes.readUInt32BE(16) || !bytes.readUInt32BE(20) ||
+      bytes.toString("ascii", bytes.length - 8, bytes.length - 4) !== "IEND") {
+    errors.push(`${path}: expected a complete PNG with non-zero dimensions`);
+  }
+}
+
+async function validateMarkdownLinks(path) {
+  const file = await requireFile(path, 200);
+  if (!file) return;
+
+  const markdown = await readFile(file, "utf8");
+  for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
+    const destination = match[1].trim();
+    if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(destination)) continue;
+    const [pathname] = destination.split(/[?#]/);
+    if (pathname) await requireFile(join(dirname(path), pathname));
   }
 }
 
@@ -49,6 +91,7 @@ const components = manifest
   : null;
 const tokens = manifest ? await readJson(manifest.designSystem?.tokens) : null;
 const routes = manifest?.hifi ? await readJson(manifest.hifi.routes) : null;
+const discussions = manifest?.discussions ? await readJson(manifest.discussions) : null;
 const reviews = manifest?.collaboration?.reviewScenarios
   ? await readJson(manifest.collaboration.reviewScenarios)
   : null;
@@ -66,13 +109,38 @@ if (edges.length !== 4) {
   errors.push(`flows: expected 4 connections, found ${edges.length}`);
 }
 
+const nodeIds = new Set(nodes.map(({ id }) => id));
+const documentIds = new Set(manifest?.documents?.map(({ id }) => id));
+const routeByScreen = new Map();
+if (nodeIds.size !== nodes.length) errors.push("flows: duplicate screen ID");
+if (new Set(edges.map(({ id }) => id)).size !== edges.length) {
+  errors.push("flows: duplicate edge ID");
+}
+for (const { source, target, id } of edges) {
+  if (!nodeIds.has(source) || !nodeIds.has(target)) {
+    errors.push(`flows: edge ${id} references an unknown screen`);
+  }
+}
+
 for (const node of nodes) {
   const screen = await readJson(node.screen);
   if (!screen) {
     continue;
   }
   const screenDirectory = dirname(node.screen);
-  await requireFile(join(screenDirectory, screen.wireframe), 10_000);
+  if (typeof screen.wireframe !== "string" || !screen.wireframe || isAbsolute(screen.wireframe)) {
+    errors.push(`${node.screen}: a relative wireframe path is required`);
+  } else {
+    await requirePng(join(screenDirectory, screen.wireframe));
+  }
+  if (screen.id !== node.id) errors.push(`${node.screen}: ID does not match the flow node`);
+  routeByScreen.set(node.id, screen.route);
+  for (const action of screen.actions ?? []) {
+    if (!nodeIds.has(action.target)) errors.push(`${node.screen}: unknown action target ${action.target}`);
+  }
+  for (const id of screen.linkedDocuments ?? []) {
+    if (!documentIds.has(id)) errors.push(`${node.screen}: unknown linked document ${id}`);
+  }
   for (const key of ["id", "title", "route", "purpose"]) {
     if (!screen[key]) {
       errors.push(`${node.screen}: ${key} is required`);
@@ -84,9 +152,18 @@ for (const node of nodes) {
 }
 
 for (const document of manifest?.documents ?? []) {
-  await requireFile(document.path, 200);
+  await validateMarkdownLinks(document.path);
   if (!(document.screenIds?.length > 0)) {
     errors.push(`${document.path}: screenIds must be non-empty`);
+  }
+  if (document.screenIds?.some((id) => !nodeIds.has(id))) {
+    errors.push(`${document.path}: linked screen does not exist`);
+  }
+}
+
+for (const note of discussions?.notes ?? []) {
+  if (!nodeIds.has(note.screenId) || !note.body || !Number.isFinite(Date.parse(note.createdAt))) {
+    errors.push(`discussions: note ${note.id} needs a valid screen, body, and date`);
   }
 }
 
@@ -116,7 +193,18 @@ for (const [group, values] of Object.entries(tokens ?? {})) {
 if (routes?.routes?.length !== 5) {
   errors.push(`hifi/routes.json: expected 5 routes`);
 }
-await requireFile("hifi/editorial-bridge.png", 10_000);
+const routePaths = new Set();
+for (const route of routes?.routes ?? []) {
+  if (!nodeIds.has(route.screenId) || routeByScreen.get(route.screenId) !== route.path ||
+      routePaths.has(route.path)) {
+    errors.push(`hifi/routes.json: invalid or duplicate route ${route.path}`);
+  }
+  routePaths.add(route.path);
+}
+if (!routePaths.has(manifest?.hifi?.defaultRoute)) {
+  errors.push("hifi/routes.json: default route is missing");
+}
+await requirePng("hifi/editorial-bridge.png");
 
 const scenario = reviews?.comparisons?.find(
   (item) =>
@@ -136,7 +224,7 @@ if (!scenario) {
 }
 
 const insideGit = git(["rev-parse", "--is-inside-work-tree"], true) === "true";
-if (insideGit) {
+if (insideGit && !process.argv.includes("--structure-only")) {
   const mainRef =
     git(["rev-parse", "--verify", "main^{commit}"], true)
       ? "main"

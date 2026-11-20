@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "ProtoRaft",
     "shortDescription": "Go from a quick wireframe to a shared design core.",
-    "longDescription": "ProtoRaft gives product and marketing teams a Codex-native workbench for one-minute atomic wireframes with discussion notes, lightweight product documents, design tokens, component contracts, HiFi previews, native core sync, and Git-based review.",
+    "longDescription": "ProtoRaft gives product and marketing teams a Codex-native workbench for wireframes with discussion notes, lightweight product documents, design tokens, component contracts, HiFi previews, native core sync, and Git-based review.",
     "developerName": "2BAB",
     "category": "Productivity",
     "brandColor": "#111111",
