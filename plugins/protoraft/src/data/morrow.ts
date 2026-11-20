@@ -120,7 +120,7 @@ stateDiagram-v2
 export const morrowProject: PrototypeProject = {
   projectId: "morrow-v0.1",
   name: "Morrow",
-  repositoryName: "ProtoRaft-Sample",
+  repositoryName: "Morrow",
   version: "0.1",
   summary: "A calm daily magazine for deliberate reading and listening.",
   defaultBranch: "main",

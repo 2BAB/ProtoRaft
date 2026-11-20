@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile, copyFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, copyFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,12 +11,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { build } from "esbuild";
 
 const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const source = process.argv[2];
-const generatedPng = process.argv[3];
-if (!source) throw new Error("Pass the local ProtoRaft-Sample Git directory. An optional second argument supplies a generated PNG.");
+const workspace = resolve(plugin, "../..");
+const [generatedPng, ...extra] = process.argv.slice(2);
+if (extra.length) throw new Error("Usage: node workbench-smoke.mjs [generated-wireframe.png]");
 const endpoint = process.env.PROTORAFT_TEST_CDP ?? "http://127.0.0.1:9333";
 const scratch = await mkdtemp(join(tmpdir(), "protoraft-workbench-smoke-"));
-const root = join(scratch, "Morrow");
+const checkout = join(scratch, "Morrow");
+const samplePath = join("examples", "morrow");
+const root = join(checkout, samplePath);
+const compareBranch = "feature/morrow-listen";
 const clients = [];
 let browserConnection;
 let pageConnection;
@@ -36,6 +39,15 @@ function hasRef(cwd, ref) {
     if (error.status === 1) return false;
     throw error;
   }
+}
+
+function fixtureRef(branch) {
+  const ref = `refs/remotes/origin/${branch}`;
+  if (!hasRef(checkout, ref)) {
+    // A checkout may have the fixture branch only as a remote-tracking ref.
+    git(checkout, "fetch", "--no-tags", workspace, `${ref}:${ref}`);
+  }
+  return ref;
 }
 
 async function connectMcp() {
@@ -101,15 +113,9 @@ frame.src = "/app";
 `;
 
 try {
-  git(scratch, "clone", "--quiet", "--no-hardlinks", resolve(source), root);
-  const compareBranch = "feature/morrow-listen";
-  if (hasRef(root, `refs/remotes/origin/${compareBranch}`)) {
-    git(root, "branch", compareBranch, `origin/${compareBranch}`);
-  } else {
-    // A normal checkout may keep the demo branch only as a remote-tracking ref.
-    git(root, "fetch", "--no-tags", resolve(source),
-      `refs/remotes/origin/${compareBranch}:refs/heads/${compareBranch}`);
-  }
+  git(scratch, "clone", "--quiet", "--no-hardlinks", "--no-checkout", workspace, checkout);
+  git(checkout, "switch", "-C", "main", fixtureRef("main"));
+  git(checkout, "branch", "-f", compareBranch, fixtureRef(compareBranch));
   const client = await connectMcp();
   const peer = await connectMcp();
   const call = (name, args, connection = client) => connection.callTool({ name, arguments: args });
@@ -349,7 +355,7 @@ try {
   assert.equal(last("retry_wireframe_request").args.requestId, second.id);
 
   const claimed = await checked("claim_wireframe_request", { projectId, requestId: first.id, agentName: "qa-first" });
-  assert.ok(claimed.rootPath.endsWith("/Morrow"));
+  assert.equal(claimed.rootPath, await realpath(root));
   const { output } = claimed;
   await mkdir(join(root, dirname(output.screenDefinitionPath)), { recursive: true });
   const image = generatedPng ? resolve(generatedPng) : join(root, "screens/listen/wireframe.png");
@@ -412,8 +418,9 @@ try {
   assert.match(await readFile(join(root, "collaboration/review-scenarios.json"), "utf8"), /Keep playback on Story and Saved/);
   console.log("PASS real branch scan, side-by-side committed images, durable review decision");
 
-  const feature = join(scratch, "feature");
-  git(root, "worktree", "add", feature, "feature/morrow-listen");
+  const featureCheckout = join(scratch, "feature");
+  git(checkout, "worktree", "add", featureCheckout, compareBranch);
+  const feature = join(featureCheckout, samplePath);
   await copyFile(join(root, "collaboration/review-scenarios.json"), join(feature, "collaboration/review-scenarios.json"));
   const featureBriefPath = join(feature, "documents/product-brief.md");
   await writeFile(featureBriefPath, (await readFile(featureBriefPath, "utf8")) + "\n[Read the playback rules](./interaction-spec.md)\n");
