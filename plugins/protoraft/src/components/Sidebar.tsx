@@ -54,7 +54,7 @@ export function Sidebar({
         </div>
         <div className="sidebar-wordmark">
           <strong>ProtoRaft</strong>
-          <small>v0.1</small>
+          <small>v1.1</small>
         </div>
       </div>
 

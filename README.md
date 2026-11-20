@@ -4,8 +4,8 @@ ProtoRaft is a simple, versatile, open-source Codex plugin for product design.
 It keeps wireframes, discussion notes, and product specs together in Git so
 teammates can see what changed, why it changed, and what to build next.
 
-ProtoRaft v0.1 is in development. Try the
-[Morrow sample](https://github.com/2BAB/ProtoRaft-Sample) to see the workflow.
+The [Morrow sample](https://github.com/2BAB/ProtoRaft-Sample) shows the v1.1
+workflow.
 
 ## Work with Codex
 
@@ -38,7 +38,7 @@ write to a repository, send requests to Codex, schedule checks, or publish a sit
 - An existing repository containing `protoraft.project.json`
 
 For the first installed-plugin test, use
-[ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample). ProtoRaft v0.1
+[ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample). ProtoRaft v1.1
 does not initialize an arbitrary repository yet.
 
 Image generation requires ImageGen in the active Codex environment. Publishing
@@ -113,7 +113,7 @@ full-screen MCP App. No persistent localhost service is required.
    **Scheduled** with the selected cadence and execution environment.
 6. Optionally verify the branch and commit, then publish a read-only snapshot with Codex Sites.
 7. Ask to open a repository without `protoraft.project.json` and confirm the
-   agent explains the v0.1 boundary without inventing or writing project files.
+   agent explains the v1.1 boundary without inventing or writing project files.
 
 ## How the plugin works
 
@@ -121,7 +121,7 @@ The installable package lives in `plugins/protoraft/`. Its runtime is a bundled
 Node stdio MCP server plus a single-file MCP App. Git-readable project files are
 the source of truth; the workbench does not add a database.
 
-Wireframe generation and native sync are agent-driven in v0.1. The workbench
+Wireframe generation and native sync are agent-driven in v1.1. The workbench
 queues durable requests and stores reviewable artifacts, while Codex performs
 ImageGen or target-repository implementation after reading the bundled Skills.
 
@@ -143,7 +143,7 @@ verification, and bounded correction have different inputs and stopping
 conditions. `sync-native-core` coordinates the other three instead of
 duplicating their instructions.
 
-## Current v0.1 boundaries
+## Current v1.1 boundaries
 
 - The first installed workflow is centered on the Morrow sample. Project
   initialization is not implemented yet.

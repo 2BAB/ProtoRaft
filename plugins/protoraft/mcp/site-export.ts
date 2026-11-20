@@ -109,7 +109,7 @@ export async function prepareSiteExport({
     `${JSON.stringify(
       {
         name: `${packageName(project.name)}-review-site`,
-        version: "0.1.0",
+        version: "1.1.0",
         private: true,
         type: "module",
         engines: { node: ">=22.13.0" },

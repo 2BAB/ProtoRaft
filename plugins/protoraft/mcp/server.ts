@@ -31,7 +31,7 @@ function result(payload: Record<string, unknown>, message: string) {
 function createServer() {
   const server = new McpServer({
     name: "protoraft",
-    version: "0.1.0",
+    version: "1.1.0",
   });
 
   registerAppResource(
@@ -743,7 +743,7 @@ function createServer() {
 
 async function main() {
   if (!process.argv.includes("--stdio")) {
-    throw new Error("ProtoRaft v0.1 supports stdio transport only.");
+    throw new Error("ProtoRaft supports stdio transport only.");
   }
   await trackDiagnostic("mcp", "server.start", {}, async () => {
     const server = createServer();
