@@ -31,7 +31,7 @@ function result(payload: Record<string, unknown>, message: string) {
 function createServer() {
   const server = new McpServer({
     name: "protoraft",
-    version: "0.1.0",
+    version: "1.1.0",
   });
 
   registerAppResource(
@@ -255,13 +255,36 @@ function createServer() {
 
   registerAppTool(
     server,
+    "list_protoraft_publication_sources",
+    {
+      title: "List shareable Git snapshots",
+      description: "Find the exact commits available for Production and branch review.",
+      inputSchema: { projectId: z.string().min(1) },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId }) => {
+      const sources = await store.listPublicationSources(projectId);
+      return result({ sources }, `Found ${sources.length} shareable Git snapshots.`);
+    },
+  );
+
+  registerAppTool(
+    server,
     "prepare_protoraft_site",
     {
       title: "Prepare ProtoRaft review site",
       description:
-        "Create a temporary Codex Sites source package containing the current project's read-only default-branch Production view.",
+        "Prepare a read-only Codex Sites snapshot from a pinned Production or branch-review commit.",
       inputSchema: {
         projectId: z.string().min(1),
+        source: z.object({
+          kind: z.enum(["production", "branch-review"]),
+          branch: z.string().min(1),
+          commit: z.string().regex(/^[a-f0-9]{40,64}$/),
+          baseBranch: z.string().min(1).optional(),
+          baseCommit: z.string().regex(/^[a-f0-9]{40,64}$/).optional(),
+        }).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -276,7 +299,7 @@ function createServer() {
         },
       },
     },
-    async ({ projectId }) =>
+    async ({ projectId, source }) =>
       trackDiagnostic(
         "mcp",
         "tool.prepare-site",
@@ -285,11 +308,12 @@ function createServer() {
           const site = await prepareSiteExport({
             store,
             projectId,
+            source,
             uiTemplatePath: join(DIST_DIRECTORY, "index.html"),
           });
           return result(
             { site },
-            `Prepared the ${site.branch} Production site for ${site.projectName}.`,
+            `Prepared ${site.projectName} from ${site.branch} at ${site.commit.slice(0, 7)}.`,
           );
         },
       ),
@@ -334,7 +358,7 @@ function createServer() {
         projectId: z.string().min(1),
         path: z.string().min(1),
         content: z.string(),
-        expectedRevision: z.string().optional(),
+        expectedRevision: z.string().min(1),
       },
       annotations: {
         readOnlyHint: false,
@@ -379,6 +403,7 @@ function createServer() {
         body: z.string().min(1).max(2000),
         author: z.string().min(1).max(120).optional(),
         expectedRevision: z.string().optional(),
+        noteId: z.string().regex(/^note_[a-f0-9]{32}$/).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -399,6 +424,7 @@ function createServer() {
       body,
       author,
       expectedRevision,
+      noteId,
     }) =>
       trackDiagnostic(
         "mcp",
@@ -410,6 +436,7 @@ function createServer() {
             body,
             author,
             expectedRevision,
+            noteId,
           });
           return result(
             { saved },
@@ -431,6 +458,8 @@ function createServer() {
         title: z.string().min(1).max(120),
         purpose: z.string().min(1).max(2000),
         screenType: z.string().min(1).max(80),
+        sourceScreenId: z.string().min(1).max(100).optional(),
+        requestId: z.string().regex(/^req_[a-f0-9]{12}$/).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -445,7 +474,7 @@ function createServer() {
         },
       },
     },
-    async ({ projectId, title, purpose, screenType }) =>
+    async ({ projectId, title, purpose, screenType, sourceScreenId, requestId }) =>
       trackDiagnostic(
         "mcp",
         "tool.create-wireframe-request",
@@ -455,6 +484,8 @@ function createServer() {
             title,
             purpose,
             screenType,
+            sourceScreenId,
+            requestId,
           });
           return result(
             { request },
@@ -462,6 +493,60 @@ function createServer() {
           );
         },
       ),
+  );
+
+  registerAppTool(
+    server,
+    "list_wireframe_requests",
+    {
+      title: "List wireframe requests",
+      description: "Read generation progress and completed screen IDs without exposing claim tokens.",
+      inputSchema: { projectId: z.string().min(1) },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app", "model"] } },
+    },
+    async ({ projectId }) => {
+      const requests = await store.listWireframeRequests(projectId);
+      return result({ requests }, `Loaded ${requests.length} wireframe requests.`);
+    },
+  );
+
+  registerAppTool(
+    server,
+    "retry_wireframe_request",
+    {
+      title: "Retry wireframe generation",
+      description: "Return a failed or timed-out wireframe to the queue.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        requestId: z.string().regex(/^req_[a-f0-9]{12}$/),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId, requestId }) => {
+      const request = await store.retryWireframeRequest(projectId, requestId);
+      return result({ request }, `Queued ${request.id} for retry.`);
+    },
+  );
+
+  server.registerTool(
+    "fail_wireframe_request",
+    {
+      title: "Report failed wireframe generation",
+      description: "Keep a failed generation visible in the workbench and let the user retry.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        requestId: z.string().regex(/^req_[a-f0-9]{12}$/),
+        claimToken: z.string().regex(/^claim_[a-f0-9]{20}$/),
+        error: z.string().min(1).max(500),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+    },
+    async ({ projectId, requestId, claimToken, error }) => {
+      const request = await store.failWireframeRequest(projectId, requestId, claimToken, error);
+      return result({ request }, `Recorded failure for ${request.id}.`);
+    },
   );
 
   server.registerTool(
@@ -493,8 +578,19 @@ function createServer() {
             requestId,
             agentName,
           );
+          const rootPath = store.get(projectId).root;
+          const screenId = `screen-${requestId.slice(4)}-${request.claimToken!.slice(-6)}`;
+          const screenDirectory = `screens/${screenId}`;
           return result(
-            { request },
+            {
+              request,
+              rootPath,
+              output: {
+                screenId,
+                screenDefinitionPath: `${screenDirectory}/screen.json`,
+                wireframePath: `${screenDirectory}/wireframe.png`,
+              },
+            },
             `Claimed ${request.id}. Use claim token ${request.claimToken} when completing it.`,
           );
         },
@@ -506,7 +602,7 @@ function createServer() {
     {
       title: "Complete wireframe request",
       description:
-        "Complete a claimed request after its atomic image and screen definition exist inside the project.",
+        "Validate a generated PNG and its screen definition, place the screen on the project canvas, and complete the request.",
       inputSchema: {
         projectId: z.string().min(1),
         requestId: z.string().regex(/^req_[a-f0-9]{12}$/),
@@ -555,6 +651,49 @@ function createServer() {
 
   registerAppTool(
     server,
+    "get_protoraft_branch_images",
+    {
+      title: "Read wireframe images from compared commits",
+      description: "Load the two committed versions of a changed image.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        base: z.string().regex(/^[a-f0-9]{40,64}$/),
+        compare: z.string().regex(/^[a-f0-9]{40,64}$/),
+        path: z.string().min(1),
+        previousPath: z.string().min(1).optional(),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId, base, compare, path, previousPath }) =>
+      result(await store.readBranchImages(projectId, base, compare, path, previousPath), "Loaded committed wireframe images."),
+  );
+
+  registerAppTool(
+    server,
+    "save_protoraft_review_decision",
+    {
+      title: "Save a product decision for branch review",
+      description: "Record the decision against a declared review artifact in the local Git working tree.",
+      inputSchema: {
+        projectId: z.string().min(1),
+        base: z.string().min(1),
+        compare: z.string().min(1),
+        path: z.string().min(1),
+        decision: z.string().trim().min(1).max(2000),
+        expectedRevision: z.string().min(1),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ projectId, ...input }) => {
+      const saved = await store.saveReviewDecision(projectId, input);
+      return result({ saved }, "Saved the product decision to the review scenario.");
+    },
+  );
+
+  registerAppTool(
+    server,
     "compare_protoraft_branches",
     {
       title: "Compare ProtoRaft branches",
@@ -565,6 +704,7 @@ function createServer() {
         base: z.string().min(1),
         compare: z.string().min(1),
         scanConflicts: z.boolean().default(true),
+        includeReview: z.boolean().default(false),
       },
       annotations: {
         readOnlyHint: true,
@@ -577,7 +717,7 @@ function createServer() {
         },
       },
     },
-    async ({ projectId, base, compare, scanConflicts }) =>
+    async ({ projectId, base, compare, scanConflicts, includeReview }) =>
       trackDiagnostic(
         "mcp",
         "tool.compare-branches",
@@ -589,8 +729,9 @@ function createServer() {
             compare,
             scanConflicts,
           );
+          const branches = includeReview ? await store.loadBranchReview(projectId, base, compare) : undefined;
           return result(
-            { comparison },
+            { comparison, branches },
             `Compared ${comparison.base} with ${comparison.compare}: ${comparison.changedFiles.length} changed files and ${comparison.possibleConflicts.length} possible conflicts.`,
           );
         },
@@ -602,7 +743,7 @@ function createServer() {
 
 async function main() {
   if (!process.argv.includes("--stdio")) {
-    throw new Error("ProtoRaft v0.1 supports stdio transport only.");
+    throw new Error("ProtoRaft supports stdio transport only.");
   }
   await trackDiagnostic("mcp", "server.start", {}, async () => {
     const server = createServer();

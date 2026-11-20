@@ -1,5 +1,6 @@
 import { Check, MessageSquareText, Send, X } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { randomHex } from "../client-id";
 import type { DiscussionNote, PrototypeScreen } from "../types";
 
 interface WireframeReviewProps {
@@ -8,7 +9,7 @@ interface WireframeReviewProps {
   notes: DiscussionNote[];
   readOnly: boolean;
   onClose: () => void;
-  onAddNote: (body: string) => Promise<void>;
+  onAddNote: (body: string, noteId: string) => Promise<void>;
 }
 
 function formatTime(value: string) {
@@ -32,13 +33,14 @@ export function WireframeReview({
 }: WireframeReviewProps) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState("");
+  const pendingNote = useRef<{ id: string; body: string; screenId: string } | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      setDraft("");
-      setSaving(false);
-    }
-  }, [open]);
+    setDraft("");
+    setFailure("");
+    pendingNote.current = null;
+  }, [screen.id]);
 
   if (!open) {
     return null;
@@ -50,9 +52,18 @@ export function WireframeReview({
       return;
     }
     setSaving(true);
+    setFailure("");
+    const body = draft.trim();
+    if (pendingNote.current?.body !== body || pendingNote.current.screenId !== screen.id) {
+      const id = `note_${randomHex(16)}`;
+      pendingNote.current = { id, body, screenId: screen.id };
+    }
     try {
-      await onAddNote(draft.trim());
+      await onAddNote(body, pendingNote.current.id);
       setDraft("");
+      pendingNote.current = null;
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Could not add the note. Your draft is still here.");
     } finally {
       setSaving(false);
     }
@@ -130,11 +141,13 @@ export function WireframeReview({
               <form onSubmit={submit}>
                 <textarea
                   value={draft}
+                  disabled={saving}
                   rows={4}
                   placeholder="Record a decision or question"
                   aria-label="Discussion note"
                   onChange={(event) => setDraft(event.target.value)}
                 />
+                {failure && <p className="write-feedback" role="alert">{failure}</p>}
                 <button
                   type="submit"
                   className="button button--primary"

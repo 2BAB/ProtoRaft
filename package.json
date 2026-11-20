@@ -1,7 +1,8 @@
 {
   "name": "protoraft-workspace",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.1.0",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@10.19.0",
   "engines": {
     "node": ">=22.12.0"

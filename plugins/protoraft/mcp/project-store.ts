@@ -6,6 +6,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
@@ -22,11 +23,31 @@ import {
   resolve,
 } from "node:path";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { crc32 } from "node:zlib";
+
+import { z } from "zod";
+import type { BranchChange, BranchSnapshot, PublicationSource } from "../src/types";
+import { markdownAssetPaths } from "./markdown-assets";
 
 const execFileAsync = promisify(execFile);
 const PROJECT_MANIFEST = "protoraft.project.json";
 const REQUEST_DIRECTORY = ".protoraft/requests";
+const CLAIM_LEASE_MS = 30 * 60 * 1000;
+const SCREEN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const generatedScreenSchema = z.object({
+  id: z.string().regex(SCREEN_ID),
+  title: z.string().trim().min(1),
+  route: z.string().startsWith("/"),
+  purpose: z.string().trim().min(1),
+  wireframe: z.string().min(1),
+  stage: z.enum(["wireframe", "review", "approved"]).optional(),
+  entry: z.array(z.string()).optional(),
+  actions: z.array(z.object({ label: z.string(), target: z.string() })).optional(),
+  states: z.array(z.string()).optional(),
+  linkedDocuments: z.array(z.string()).optional(),
+});
 const REVIEW_STATUS_DIRECTORY = "protoraft";
 const REVIEW_STATUS_FILE = "review-status.json";
 const TEXT_PREVIEW_EXTENSIONS = new Set([
@@ -126,10 +147,13 @@ interface ReviewScenariosFile {
   comparisons?: Array<{
     base: string;
     compare: string;
+    title?: string;
     changes?: Array<{
       path: string;
       summary?: string;
       recommendation?: string;
+      resolutionCriteria?: string[];
+      decision?: string;
     }>;
   }>;
 }
@@ -157,6 +181,7 @@ export interface SaveDocumentResult {
   path: string;
   previousRevision: string;
   revision: string;
+  assetPaths: string[];
 }
 
 export interface AddDiscussionNoteResult {
@@ -176,7 +201,9 @@ export interface WireframeRequest {
   title: string;
   purpose: string;
   screenType: string;
-  status: "queued" | "claimed" | "completed";
+  status: "queued" | "claimed" | "completed" | "failed";
+  sourceScreenId?: string;
+  error?: string;
   createdAt: string;
   updatedAt: string;
   claimedBy?: string;
@@ -193,8 +220,43 @@ export interface BranchComparison {
   changedFiles: Array<{
     path: string;
     kind: "added" | "modified" | "deleted" | "renamed";
+    previousPath?: string;
   }>;
   possibleConflicts: string[];
+}
+
+function isCompletePng(bytes: Buffer) {
+  const signature = Buffer.from("89504e470d0a1a0a", "hex");
+  if (!bytes.subarray(0, 8).equals(signature)) return false;
+  let hasPixels = false;
+  for (let cursor = 8; cursor + 12 <= bytes.length;) {
+    const length = bytes.readUInt32BE(cursor);
+    const payload = cursor + 8;
+    const checksum = payload + length;
+    if (checksum + 4 > bytes.length ||
+        crc32(bytes.subarray(cursor + 4, checksum)) !== bytes.readUInt32BE(checksum)) return false;
+    const kind = bytes.toString("ascii", cursor + 4, payload);
+    if (cursor === 8 && (kind !== "IHDR" || length !== 13 ||
+        !bytes.readUInt32BE(payload) || !bytes.readUInt32BE(payload + 4))) return false;
+    if (kind === "IDAT" && length > 0) hasPixels = true;
+    if (kind === "IEND") return hasPixels && length === 0 && checksum + 4 === bytes.length;
+    cursor = checksum + 4;
+  }
+  return false;
+}
+
+function claimExpired(request: WireframeRequest) {
+  return Date.now() - Date.parse(request.updatedAt) >= CLAIM_LEASE_MS;
+}
+
+function assertActiveClaim(request: WireframeRequest, claimToken: string) {
+  if (request.status !== "claimed") {
+    throw new Error("Wireframe request must be claimed before completion.");
+  }
+  if (!request.claimToken || request.claimToken !== claimToken) {
+    throw new Error("Wireframe claim token does not match.");
+  }
+  if (claimExpired(request)) throw new Error("Wireframe claim has expired. Retry the request.");
 }
 
 function hashContent(content: string | Uint8Array) {
@@ -230,13 +292,43 @@ async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(source) as T;
 }
 
-async function atomicWrite(path: string, content: string) {
+async function withFileLock<T>(path: string, action: () => Promise<T>) {
+  const lockPath = join(await realpath(dirname(path)), `.${basename(path)}.protoraft-lock`);
+  const deadline = Date.now() + 3000;
+  let handle;
+  for (;;) {
+    try {
+      handle = await open(lockPath, "wx");
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) {
+        throw new Error(`File is busy: ${basename(path)}. Retry after the other write finishes.`);
+      }
+      await delay(25);
+    }
+  }
+  try {
+    return await action();
+  } finally {
+    await handle.close().catch(() => undefined);
+    await rm(lockPath, { force: true });
+  }
+}
+
+async function atomicWrite(path: string, content: string, expectedRevision?: string) {
   const tempPath = join(
     dirname(path),
     `.${path.split("/").at(-1)}.${process.pid}.${randomBytes(5).toString("hex")}.tmp`,
   );
   try {
     await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
+    if (expectedRevision) {
+      const revision = hashContent(await readFile(path));
+      if (revision !== expectedRevision) {
+        throw new Error(`REVISION_CONFLICT: expected ${expectedRevision}, found ${revision}`);
+      }
+    }
     await rename(tempPath, path);
   } finally {
     await rm(tempPath, { force: true }).catch(() => undefined);
@@ -446,6 +538,7 @@ export class ProjectStore {
           summary: screen.purpose,
           purpose: screen.purpose,
           image: `protoraft-asset:${assetPath}`,
+          assetPath,
           stage: screen.stage ?? "wireframe",
           position: node.position ?? { x: 0, y: 0 },
           entry: screen.entry ?? [],
@@ -522,6 +615,7 @@ export class ProjectStore {
       discussions,
       discussionRevision,
       documents,
+      documentAssetPaths: [...new Set(documents.flatMap((document) => markdownAssetPaths(document.filename, document.content)))],
       tokens: flattenTokens(tokenSource),
       components: (componentSource.components ?? []).map((component) => ({
         id: component.id,
@@ -546,47 +640,50 @@ export class ProjectStore {
     return this.readReviewStatusFile(this.get(projectId));
   }
 
-  async siteSourceDirectory(projectId: string) {
+  async siteSourceDirectory(projectId: string, publication?: PublicationSource) {
     const session = this.get(projectId);
     const commonDirectory = await this.gitCommonDirectory(session);
-    if (!commonDirectory) {
-      throw new Error("Site publishing requires a Git repository.");
-    }
-    const directory = join(
-      commonDirectory,
-      "protoraft",
-      "sites",
-      session.id,
-    );
+    if (!commonDirectory) throw new Error("Site publishing requires a Git repository.");
+    const suffix = publication?.kind === "branch-review"
+      ? `-${hashContent(publication.branch).slice(0, 12)}`
+      : "";
+    const directory = join(commonDirectory, "protoraft", "sites", session.id + suffix);
     await mkdir(directory, { recursive: true });
     return directory;
   }
 
-  async loadProductionProject(projectId: string) {
-    const sourceSession = this.get(projectId);
-    const branch =
-      sourceSession.manifest.collaboration?.defaultBranch ?? "main";
-    assertGitRef(branch);
+  async listPublicationSources(projectId: string): Promise<PublicationSource[]> {
+    const session = this.get(projectId);
+    const branch = session.manifest.collaboration?.defaultBranch ?? "main";
+    const [base, compare] = await this.readBranchCandidates(session);
+    if (base?.name !== branch) throw new Error(`Default branch ${branch} was not found.`);
+    const commit = await this.git(session, ["rev-parse", "--verify", `${base.ref}^{commit}`]);
+    const sources: PublicationSource[] = [{ kind: "production", branch, commit }];
+    if (compare) {
+      sources.push({
+        kind: "branch-review",
+        branch: compare.name,
+        commit: await this.git(session, ["rev-parse", "--verify", `${compare.ref}^{commit}`]),
+        baseBranch: branch,
+        baseCommit: commit,
+      });
+    }
+    return sources;
+  }
 
-    const candidates = branch.startsWith("origin/")
-      ? [branch]
-      : [branch, `origin/${branch}`];
-    let sourceRef = "";
-    for (const candidate of candidates) {
-      assertGitRef(candidate);
-      const commit = await this.git(
-        sourceSession,
-        ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`],
-        { allowFailure: true },
-      );
-      if (commit) {
-        sourceRef = candidate;
-        break;
-      }
+  async loadProductionProject(projectId: string, requested?: PublicationSource) {
+    const sourceSession = this.get(projectId);
+    const available = await this.listPublicationSources(projectId);
+    const publication = requested
+      ? available.find((source) =>
+          source.kind === requested.kind && source.branch === requested.branch &&
+          source.commit === requested.commit && source.baseBranch === requested.baseBranch &&
+          source.baseCommit === requested.baseCommit)
+      : available[0];
+    if (!publication) {
+      throw new Error("The source branch changed. Pick the new revision before sharing.");
     }
-    if (!sourceRef) {
-      throw new Error(`Default branch ${branch} was not found.`);
-    }
+    const branch = publication.branch;
 
     const gitRoot = await this.gitRoot(sourceSession);
     const projectPrefix = await this.projectGitPrefix(sourceSession);
@@ -606,7 +703,7 @@ export class ProjectStore {
           "add",
           "--detach",
           checkoutRoot,
-          sourceRef,
+          publication.commit,
         ],
         { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
       );
@@ -633,25 +730,39 @@ export class ProjectStore {
           };
         }),
       );
-      const primaryBranch =
-        snapshot.branches.find((item) => item.name === branch) ??
-        snapshot.branches[0];
+      const screenAssets = new Set(screens.map((screen) => screen.assetPath));
+      const documentAssets: Record<string, string> = {};
+      for (const path of snapshot.documentAssetPaths) {
+        if (screenAssets.has(path)) continue;
+        try {
+          const asset = await snapshotStore.readAsset(snapshotSession.id, path);
+          documentAssets[path] = `data:${asset.mimeType};base64,${asset.data}`;
+        } catch {
+          // The document renderer reports unavailable resources in the snapshot.
+        }
+      }
+      let branches: BranchSnapshot[];
+      if (publication.kind === "branch-review" && publication.baseBranch && publication.baseCommit) {
+        branches = await snapshotStore.readComparisonSnapshots(snapshotSession, [
+          { name: publication.baseBranch, ref: publication.baseCommit },
+          { name: publication.branch, ref: publication.commit },
+        ], true);
+      } else {
+        branches = [{
+          name: branch, label: "Main", commit: publication.commit.slice(0, 7),
+          author: "", updatedAt: "", changes: [],
+        }];
+      }
 
       return {
         ...snapshot,
         projectId: sourceSession.id,
-        defaultBranch: branch,
+        repositoryName: basename(gitRoot),
+        defaultBranch: sourceSession.manifest.collaboration?.defaultBranch ?? "main",
         screens,
-        branches: primaryBranch
-          ? [
-              {
-                ...primaryBranch,
-                name: branch,
-                label: "Main",
-                changes: [],
-              },
-            ]
-          : [],
+        documentAssets,
+        branches,
+        publication,
         reviewStatus: { state: "not-checked" as const },
       };
     } finally {
@@ -709,21 +820,21 @@ export class ProjectStore {
       );
     }
 
+    if (!expectedRevision) throw new Error("Document revision is required. Reload the document before saving.");
     const path = await this.resolveWritable(session, normalized);
-    const current = await readFile(path, "utf8");
-    const previousRevision = hashContent(current);
-    if (expectedRevision && expectedRevision !== previousRevision) {
-      throw new Error(
-        `REVISION_CONFLICT: expected ${expectedRevision}, found ${previousRevision}`,
-      );
-    }
-
-    await atomicWrite(path, content);
-    return {
-      path: normalized,
-      previousRevision,
-      revision: hashContent(content),
-    };
+    return withFileLock(path, async () => {
+      const previousRevision = hashContent(await readFile(path));
+      if (expectedRevision !== previousRevision) {
+        throw new Error(
+          `REVISION_CONFLICT: expected ${expectedRevision}, found ${previousRevision}`,
+        );
+      }
+      await atomicWrite(path, content, previousRevision);
+      return {
+        path: normalized, previousRevision, revision: hashContent(content),
+        assetPaths: markdownAssetPaths(normalized, content),
+      };
+    });
   }
 
   async addDiscussionNote(
@@ -733,6 +844,7 @@ export class ProjectStore {
       body: string;
       author?: string;
       expectedRevision?: string;
+      noteId?: string;
     },
   ): Promise<AddDiscussionNoteResult> {
     const session = this.get(projectId);
@@ -758,41 +870,38 @@ export class ProjectStore {
       session,
       session.manifest.discussions,
     );
-    const current = await readFile(path, "utf8");
-    const currentRevision = hashContent(current);
-    if (
-      input.expectedRevision &&
-      input.expectedRevision !== currentRevision
-    ) {
-      throw new Error(
-        `REVISION_CONFLICT: expected ${input.expectedRevision}, found ${currentRevision}`,
-      );
-    }
-
-    const discussionFile = JSON.parse(current) as DiscussionFile;
-    const note = {
-      id: `note_${randomBytes(6).toString("hex")}`,
-      screenId: input.screenId,
-      author,
-      body,
-      createdAt: new Date().toISOString(),
-    };
-    const content = `${JSON.stringify(
-      { notes: [...(discussionFile.notes ?? []), note] },
-      null,
-      2,
-    )}\n`;
-    await atomicWrite(path, content);
-
-    return {
-      note,
-      revision: hashContent(content),
-    };
+    return withFileLock(path, async () => {
+      const current = await readFile(path, "utf8");
+      const currentRevision = hashContent(current);
+      const discussion = JSON.parse(current) as DiscussionFile;
+      const existing = discussion.notes?.find((note) => note.id === input.noteId);
+      if (existing) {
+        if (existing.screenId !== input.screenId || existing.body !== body || existing.author !== author) {
+          throw new Error("This note ID already belongs to a different note.");
+        }
+        return { note: existing, revision: currentRevision };
+      }
+      if (input.expectedRevision && input.expectedRevision !== currentRevision) {
+        throw new Error(
+          `REVISION_CONFLICT: expected ${input.expectedRevision}, found ${currentRevision}`,
+        );
+      }
+      const note = {
+        id: input.noteId ?? `note_${randomBytes(6).toString("hex")}`,
+        screenId: input.screenId,
+        author,
+        body,
+        createdAt: new Date().toISOString(),
+      };
+      const content = `${JSON.stringify({ ...discussion, notes: [...(discussion.notes ?? []), note] }, null, 2)}\n`;
+      await atomicWrite(path, content, currentRevision);
+      return { note, revision: hashContent(content) };
+    });
   }
 
   async createWireframeRequest(
     projectId: string,
-    input: { title: string; purpose: string; screenType: string },
+    input: { title: string; purpose: string; screenType: string; sourceScreenId?: string; requestId?: string },
   ): Promise<WireframeRequest> {
     const session = this.get(projectId);
     const requestDirectory = resolve(session.root, REQUEST_DIRECTORY);
@@ -807,20 +916,34 @@ export class ProjectStore {
 
     const now = new Date().toISOString();
     const request: WireframeRequest = {
-      id: `req_${randomBytes(6).toString("hex")}`,
+      id: input.requestId ?? `req_${randomBytes(6).toString("hex")}`,
       projectId,
       title: input.title,
       purpose: input.purpose,
       screenType: input.screenType,
+      sourceScreenId: input.sourceScreenId,
       status: "queued",
       createdAt: now,
       updatedAt: now,
     };
-    await atomicWrite(
-      join(actualDirectory, `${request.id}.json`),
-      `${JSON.stringify(request, null, 2)}\n`,
-    );
-    return request;
+    if (!/^req_[a-f0-9]{12}$/.test(request.id)) throw new Error("Invalid wireframe request ID.");
+    const path = join(actualDirectory, `${request.id}.json`);
+    return withFileLock(path, async () => {
+      try {
+        const existing = await readJson<WireframeRequest>(path);
+        if (existing.projectId !== projectId || existing.title !== input.title ||
+            existing.purpose !== input.purpose || existing.screenType !== input.screenType ||
+            existing.sourceScreenId !== input.sourceScreenId) {
+          throw new Error("This request ID already belongs to a different draft.");
+        }
+        const { claimToken: _claimToken, ...current } = existing;
+        return current;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      await atomicWrite(path, `${JSON.stringify(request, null, 2)}\n`);
+      return request;
+    });
   }
 
   private async readRequest(projectId: string, requestId: string) {
@@ -836,6 +959,60 @@ export class ProjectStore {
       requestPath,
       request: await readJson<WireframeRequest>(requestPath),
     };
+  }
+
+  async listWireframeRequests(projectId: string) {
+    const session = this.get(projectId);
+    let directory: string;
+    try {
+      directory = await this.resolveExisting(session, REQUEST_DIRECTORY);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    const entries = await readdir(directory, { withFileTypes: true });
+    const requests = await Promise.all(
+      entries.filter((entry) => entry.isFile() && /^req_[a-f0-9]{12}\.json$/.test(entry.name))
+        .map((entry) => readJson<WireframeRequest>(join(directory, entry.name))),
+    );
+    const flow = requests.some((request) => request.status === "completed")
+      ? await readJson<FlowFile>(await this.resolveExisting(session, session.manifest.flow))
+      : undefined;
+    return requests.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(({ claimToken: _claimToken, ...request }) => {
+        if (request.status === "claimed" && claimExpired(request)) {
+          return { ...request, status: "failed" as const, error: "Generation timed out. You can retry this request." };
+        }
+        if (request.status === "completed") {
+          return { ...request, availableOnCanvas: Boolean(flow?.nodes.some((node) => node.id === request.screenId)) };
+        }
+        return request;
+      });
+  }
+
+  async failWireframeRequest(projectId: string, requestId: string, claimToken: string, error: string) {
+    return this.withRequestLock(projectId, requestId, async () => {
+      const { requestPath, request } = await this.readRequest(projectId, requestId);
+      assertActiveClaim(request, claimToken);
+      const { claimToken: _claimToken, ...rest } = request;
+      const updated: WireframeRequest = { ...rest, status: "failed", error, updatedAt: new Date().toISOString() };
+      await atomicWrite(requestPath, `${JSON.stringify(updated, null, 2)}\n`);
+      return updated;
+    });
+  }
+
+  async retryWireframeRequest(projectId: string, requestId: string) {
+    return this.withRequestLock(projectId, requestId, async () => {
+      const { requestPath, request } = await this.readRequest(projectId, requestId);
+      if (request.status === "queued") return request;
+      if (request.status !== "failed" && !(request.status === "claimed" && claimExpired(request))) {
+        throw new Error("Only a failed or timed-out request can be retried.");
+      }
+      const { claimToken: _token, claimedBy: _agent, error: _error, ...rest } = request;
+      const updated: WireframeRequest = { ...rest, status: "queued", updatedAt: new Date().toISOString() };
+      await atomicWrite(requestPath, `${JSON.stringify(updated, null, 2)}\n`);
+      return updated;
+    });
   }
 
   async claimWireframeRequest(
@@ -881,15 +1058,8 @@ export class ProjectStore {
         projectId,
         requestId,
       );
-      if (request.status !== "claimed") {
-        throw new Error("Wireframe request must be claimed before completion.");
-      }
-      if (!request.claimToken || request.claimToken !== input.claimToken) {
-        throw new Error("Wireframe claim token does not match.");
-      }
-
-      await this.resolveExisting(session, input.screenDefinitionPath);
-      await this.resolveExisting(session, input.wireframePath);
+      assertActiveClaim(request, input.claimToken);
+      await this.registerGeneratedScreen(session, request, input);
 
       const updated: WireframeRequest = {
         ...request,
@@ -902,6 +1072,70 @@ export class ProjectStore {
       delete updated.claimToken;
       await atomicWrite(requestPath, `${JSON.stringify(updated, null, 2)}\n`);
       return updated;
+    });
+  }
+
+  private async registerGeneratedScreen(
+    session: ProjectSession,
+    request: WireframeRequest,
+    input: { screenId: string; screenDefinitionPath: string; wireframePath: string },
+  ) {
+    const screenPath = await this.resolveExisting(session, input.screenDefinitionPath);
+    const imagePath = await this.resolveExisting(session, input.wireframePath);
+    const parsed = generatedScreenSchema.safeParse(await readJson<unknown>(screenPath));
+    if (!parsed.success || parsed.data.id !== input.screenId || extname(imagePath).toLowerCase() !== ".png") {
+      throw new Error("The generated screen definition or PNG path is invalid.");
+    }
+    const screen = parsed.data;
+    const definitionPath = normalizeProjectPath(relative(session.root, screenPath));
+    const declaredImage = normalizeProjectPath(relative(session.root, resolve(dirname(screenPath), screen.wireframe)));
+    if (await this.resolveExisting(session, declaredImage) !== imagePath) {
+      throw new Error("The screen definition must reference the submitted wireframe.");
+    }
+    const imageSize = (await stat(imagePath)).size;
+    if (imageSize < 33 || imageSize > 12 * 1024 * 1024) {
+      throw new Error("The generated wireframe must be a PNG smaller than 12 MB.");
+    }
+    if (!isCompletePng(await readFile(imagePath))) {
+      throw new Error("The generated wireframe must be a complete PNG.");
+    }
+
+    const flowPath = await this.resolveExisting(session, session.manifest.flow);
+    await withFileLock(flowPath, async () => {
+      const original = await readFile(flowPath, "utf8");
+      const flow = JSON.parse(original) as FlowFile;
+      const source = flow.nodes.find((node) => node.id === request.sourceScreenId);
+      const existing = flow.nodes.find((node) => node.id === screen.id);
+      if (existing && await this.resolveExisting(session, existing.screen) !== screenPath) {
+        throw new Error(`Screen ID "${screen.id}" already points to a different file.`);
+      }
+      if (request.sourceScreenId && !source) {
+        throw new Error("The source screen was removed. Select an existing screen and start a new request.");
+      }
+      if (!existing) {
+        const otherScreens = await Promise.all(flow.nodes.map(async (node) =>
+          readJson<ScreenFile>(await this.resolveExisting(session, node.screen)),
+        ));
+        if (otherScreens.some((item) => item.route === screen.route)) {
+          throw new Error(`Route "${screen.route}" is already in use. Choose a distinct route.`);
+        }
+        flow.nodes.push({
+          id: screen.id,
+          screen: definitionPath,
+          position: {
+            x: Math.max(0, ...flow.nodes.map((node) => node.position?.x ?? 0)) + 360,
+            y: source?.position?.y ?? 0,
+          },
+        });
+      }
+      const shouldConnect = source && source.id !== screen.id &&
+        !flow.edges.some((edge) => edge.source === source.id && edge.target === screen.id);
+      if (shouldConnect) {
+        flow.edges.push({ id: `wireframe-${request.id}`, source: source.id, target: screen.id, label: screen.title });
+      }
+      if (!existing || shouldConnect) {
+        await atomicWrite(flowPath, `${JSON.stringify(flow, null, 2)}\n`, hashContent(original));
+      }
     });
   }
 
@@ -1065,7 +1299,7 @@ export class ProjectStore {
     return this.git(session, ["show", object], { allowFailure: true });
   }
 
-  private async readBranchSnapshots(session: ProjectSession) {
+  private async readBranchCandidates(session: ProjectSession) {
     const defaultBranch =
       session.manifest.collaboration?.defaultBranch ?? "main";
     const current =
@@ -1107,7 +1341,6 @@ export class ProjectStore {
       name,
       ref: localRefs.includes(name) ? name : (remoteByName.get(name) ?? name),
     }));
-    const prefix = await this.projectGitPrefix(session);
     const available: GitBranchCandidate[] = [];
     for (const candidate of ordered) {
       const exists = await this.git(
@@ -1123,122 +1356,155 @@ export class ProjectStore {
       }
     }
 
-    const reviewScenario = await this.readReviewScenario(
-      session,
-      available[0]?.name,
-      available[1]?.name,
-    );
-    const snapshots = [];
-    for (const [index, candidate] of available.entries()) {
-      const commit = await this.git(session, [
-        "rev-parse",
-        "--short",
-        candidate.ref,
-      ]);
-      const author = await this.git(session, [
-        "show",
-        "-s",
-        "--format=%an",
-        candidate.ref,
-      ]);
-      const updatedAt = await this.git(session, [
-        "show",
-        "-s",
-        "--format=%cs",
-        candidate.ref,
-      ]);
-      let changes: Array<{
-        path: string;
-        kind: "added" | "modified" | "deleted" | "conflict";
-        area: "Wireframe" | "Document" | "Design system" | "HiFi";
-        summary: string;
-        baseContent?: string;
-        compareContent?: string;
-        recommendation?: string;
-      }> = [];
-      if (index > 0) {
-        const comparison = await this.compareBranches(
-          session.id,
-          available[0]!.ref,
-          candidate.ref,
-          true,
-        );
-        const reviewOrder = new Map(
-          (reviewScenario?.changes ?? []).map((change, reviewIndex) => [
-            normalizeProjectPath(change.path),
-            reviewIndex,
-          ]),
-        );
-        const orderedFiles = [...comparison.changedFiles].sort(
-          (left, right) =>
-            (reviewOrder.get(left.path) ?? Number.MAX_SAFE_INTEGER) -
-            (reviewOrder.get(right.path) ?? Number.MAX_SAFE_INTEGER),
-        );
-        changes = await Promise.all(
-          orderedFiles.map(async (file) => {
-            const review = reviewScenario?.changes?.find(
-              (change) => normalizeProjectPath(change.path) === file.path,
-            );
-            return {
-              path: file.path,
-              kind: comparison.possibleConflicts.includes(file.path)
-                ? ("conflict" as const)
-                : file.kind === "renamed"
-                  ? ("modified" as const)
-                  : file.kind,
-              area: file.path.startsWith("documents/")
-                ? ("Document" as const)
-                : file.path.startsWith("design/")
-                  ? ("Design system" as const)
-                  : file.path.startsWith("hifi/")
-                    ? ("HiFi" as const)
-                    : ("Wireframe" as const),
-              summary: review?.summary ?? `${file.kind} on ${candidate.name}`,
-              baseContent: await this.readGitFilePreview(
-                session,
-                available[0]!.ref,
-                file.path,
-                prefix,
-              ),
-              compareContent: await this.readGitFilePreview(
-                session,
-                candidate.ref,
-                file.path,
-                prefix,
-              ),
-              recommendation: review?.recommendation,
-            };
-          }),
-        );
-      }
-      snapshots.push({
-        name: candidate.name,
-        gitRef: candidate.ref,
-        label: candidate.name === defaultBranch ? "Main" : candidate.name,
-        author,
-        commit,
-        updatedAt,
-        changes,
-      });
+    return available;
+  }
+
+  private async readBranchSnapshots(session: ProjectSession) {
+    const candidates = await this.readBranchCandidates(session);
+    return this.readComparisonSnapshots(session, candidates);
+  }
+
+  async loadBranchReview(projectId: string, baseRef: string, compareRef: string) {
+    const session = this.get(projectId);
+    const candidates = await this.readBranchCandidates(session);
+    if (candidates[0]?.ref !== baseRef || candidates[1]?.ref !== compareRef) {
+      throw new Error("The comparison branches changed. Reopen the project and try again.");
     }
+    return this.readComparisonSnapshots(session, candidates);
+  }
+
+  private async readComparisonSnapshots(
+    session: ProjectSession,
+    candidates: GitBranchCandidate[],
+    withImages = false,
+  ): Promise<BranchSnapshot[]> {
+    const [base, compare] = candidates;
+    const prefix = await this.projectGitPrefix(session);
+    const pinned = await Promise.all(candidates.map(async (candidate) => ({
+      ...candidate,
+      commit: await this.git(session, ["rev-parse", "--verify", `${candidate.ref}^{commit}`]),
+    })));
+    const [baseCommit, compareCommit] = pinned.map((candidate) => candidate.commit);
+    const review = await this.readReviewScenario(session, base?.name, compare?.name);
+    const snapshots = await Promise.all(pinned.map(async (candidate, index): Promise<BranchSnapshot> => ({
+      name: candidate.name,
+      gitRef: candidate.ref,
+      label: index === 0 ? "Main" : candidate.name,
+      author: await this.git(session, ["show", "-s", "--format=%an", candidate.commit]),
+      commit: candidate.commit.slice(0, 7),
+      fullCommit: candidate.commit,
+      updatedAt: await this.git(session, ["show", "-s", "--format=%cs", candidate.commit]),
+      changes: [],
+    })));
+    if (!base || !compare || !snapshots[1] || !baseCommit || !compareCommit) return snapshots;
+
+    const comparison = await this.compareBranches(session.id, baseCommit, compareCommit);
+    const reviewItems = new Map((review?.scenario?.changes ?? []).map((change, index) => [
+      normalizeProjectPath(change.path), { change, index },
+    ]));
+    const ordered = [...comparison.changedFiles].sort((left, right) =>
+      (reviewItems.get(left.path)?.index ?? Number.MAX_SAFE_INTEGER) -
+      (reviewItems.get(right.path)?.index ?? Number.MAX_SAFE_INTEGER),
+    );
+    snapshots[1].reviewTitle = review?.scenario?.title;
+    snapshots[1].decisionRevision = review?.revision;
+    snapshots[1].changes = await Promise.all(ordered.map(async (file): Promise<BranchChange> => {
+      const decision = reviewItems.get(file.path)?.change;
+      const basePath = file.previousPath ?? file.path;
+      const image = /\.(png|jpe?g|webp|gif|svg)$/i.test(file.path);
+      const [baseContent, compareContent] = await Promise.all([
+        this.readGitFilePreview(session, baseCommit, basePath, prefix),
+        this.readGitFilePreview(session, compareCommit, file.path, prefix),
+      ]);
+      const [baseImage, compareImage] = withImages && image
+        ? await Promise.all([
+            this.readGitImage(session, baseCommit, basePath),
+            this.readGitImage(session, compareCommit, file.path),
+          ])
+        : [];
+      return {
+        path: file.path,
+        previousPath: file.previousPath,
+        kind: comparison.possibleConflicts.includes(file.path) ? "conflict"
+          : file.kind === "renamed" ? "modified" : file.kind,
+        area: file.path.startsWith("documents/") ? "Document"
+          : file.path.startsWith("design/") ? "Design system"
+          : file.path.startsWith("hifi/") ? "HiFi" : "Wireframe",
+        summary: decision?.summary ?? `${file.kind} on ${compare.name}`,
+        baseContent,
+        compareContent,
+        image,
+        baseImage,
+        compareImage,
+        recommendation: decision?.recommendation,
+        resolutionCriteria: decision?.resolutionCriteria,
+        decision: decision?.decision,
+        decisionRequired: Boolean(decision?.recommendation || decision?.resolutionCriteria?.length),
+      };
+    }));
     return snapshots;
   }
 
-  private async readReviewScenario(
-    session: ProjectSession,
-    base?: string,
-    compare?: string,
-  ) {
+  async readBranchImages(projectId: string, base: string, compare: string, path: string, previousPath?: string) {
+    const session = this.get(projectId);
+    const [baseImage, compareImage] = await Promise.all([
+      this.readGitImage(session, base, previousPath ?? path),
+      this.readGitImage(session, compare, path),
+    ]);
+    return { baseImage, compareImage };
+  }
+
+  private async readGitImage(session: ProjectSession, ref: string, path: string) {
+    assertGitRef(ref);
+    assertRelativePath(path);
+    const prefix = await this.projectGitPrefix(session);
+    const repositoryPath = prefix ? `${prefix}/${path}` : path;
+    const object = `${ref}:${repositoryPath}`;
+    const size = Number(await this.git(session, ["cat-file", "-s", object], { allowFailure: true }));
+    if (!Number.isFinite(size) || size <= 0 || size > 12 * 1024 * 1024) return undefined;
+    const { stdout } = await execFileAsync("git", ["-C", session.root, "show", object], {
+      encoding: "buffer",
+      maxBuffer: 12 * 1024 * 1024,
+    });
+    return `data:${mimeTypeFor(path)};base64,${stdout.toString("base64")}`;
+  }
+
+  private async readReviewScenario(session: ProjectSession, base?: string, compare?: string) {
     const scenarioPath = session.manifest.collaboration?.reviewScenarios;
-    if (!scenarioPath || !base || !compare) {
-      return undefined;
-    }
+    if (!scenarioPath || !base || !compare) return undefined;
     const path = await this.resolveExisting(session, scenarioPath);
-    const source = await readJson<ReviewScenariosFile>(path);
-    return source.comparisons?.find(
-      (scenario) =>
-        scenario.base === base && scenario.compare === compare,
-    );
+    const content = await readFile(path, "utf8");
+    const source = JSON.parse(content) as ReviewScenariosFile;
+    return {
+      scenario: source.comparisons?.find((scenario) => scenario.base === base && scenario.compare === compare),
+      revision: hashContent(content),
+    };
+  }
+
+  async saveReviewDecision(
+    projectId: string,
+    input: { base: string; compare: string; path: string; decision: string; expectedRevision: string },
+  ) {
+    const session = this.get(projectId);
+    const scenarioPath = session.manifest.collaboration?.reviewScenarios;
+    if (!scenarioPath) throw new Error("This project has no declared review scenario.");
+    const path = await this.resolveExisting(session, scenarioPath);
+    return withFileLock(path, async () => {
+      const original = await readFile(path, "utf8");
+      const revision = hashContent(original);
+      if (revision !== input.expectedRevision) {
+        throw new Error("REVISION_CONFLICT: review changed. Rescan the branches before saving.");
+      }
+      const source = JSON.parse(original) as ReviewScenariosFile;
+      const scenario = source.comparisons?.find((item) => item.base === input.base && item.compare === input.compare);
+      const change = scenario?.changes?.find((item) => normalizeProjectPath(item.path) === input.path);
+      if (!change) throw new Error("This artifact has no declared review decision.");
+      if (!input.decision.trim()) throw new Error("Write a decision before saving.");
+      change.decision = input.decision.trim();
+      const updated = `${JSON.stringify(source, null, 2)}\n`;
+      await atomicWrite(path, updated, revision);
+      return { decision: change.decision, revision: hashContent(updated) };
+    });
   }
 
   async compareBranches(
@@ -1254,36 +1520,26 @@ export class ProjectStore {
     await this.git(session, ["rev-parse", "--verify", `${compare}^{commit}`]);
     const mergeBase = await this.git(session, ["merge-base", base, compare]);
     const prefix = await this.projectGitPrefix(session);
-    const pathSpec = prefix || ".";
+    const pathSpec = ".";
     const nameStatus = await this.git(session, [
-      "diff",
-      "--name-status",
-      `${base}...${compare}`,
-      "--",
-      pathSpec,
+      "diff", "--name-status", "-z", `${base}...${compare}`, "--", pathSpec,
     ]);
-
-    const changedFiles = nameStatus
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [statusCode, firstPath, secondPath] = line.split("\t");
-        const rawPath = secondPath ?? firstPath ?? "";
-        const projectPath =
-          prefix && rawPath.startsWith(`${prefix}/`)
-            ? rawPath.slice(prefix.length + 1)
-            : rawPath;
-        const initial = statusCode?.[0];
-        const kind =
-          initial === "A"
-            ? ("added" as const)
-            : initial === "D"
-              ? ("deleted" as const)
-              : initial === "R"
-                ? ("renamed" as const)
-                : ("modified" as const);
-        return { path: projectPath, kind };
+    const fields = nameStatus.split("\0");
+    const projectPath = (path: string) =>
+      prefix && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path;
+    const changedFiles: BranchComparison["changedFiles"] = [];
+    for (let i = 0; i < fields.length - 1;) {
+      const status = fields[i++]?.[0];
+      const first = fields[i++]!;
+      const second = status === "R" || status === "C" ? fields[i++] : undefined;
+      const kind = status === "A" || status === "C" ? "added"
+        : status === "D" ? "deleted" : status === "R" ? "renamed" : "modified";
+      changedFiles.push({
+        path: projectPath(second ?? first),
+        kind,
+        ...(status === "R" ? { previousPath: projectPath(first) } : {}),
       });
+    }
 
     let possibleConflicts: string[] = [];
     if (scanConflicts) {

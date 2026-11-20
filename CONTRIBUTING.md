@@ -1,34 +1,31 @@
 # Contributing
 
-ProtoRaft welcomes focused changes that keep the plugin and its project format
-easy to inspect.
+ProtoRaft welcomes focused changes to its workbench, project format, and
+bundled Skills.
 
-## Code and dependencies
+## Set up and test
 
-- Follow the existing TypeScript, MCP, and Skill conventions.
-- Keep behavior covered by the smallest useful test.
-- Add third-party packages only when their license permits redistribution and
-  the dependency removes meaningful implementation risk.
-- Never commit secrets, private files, machine-specific paths, or generated
-  dependency directories.
-- Never open or print a real `.env` file. Document configuration names and safe
-  placeholders in `.env.example` when environment variables are needed.
+Use Node.js 22.12 or newer and the pnpm version in `package.json`.
 
-## Documentation and assets
+```sh
+pnpm install --frozen-lockfile
+pnpm verify
+node examples/morrow/scripts/validate-sample.mjs
+```
 
-- Write product copy and examples for ProtoRaft and its fictional Morrow sample.
-- Add only assets you created or have explicit permission to redistribute.
-- Record required attribution in the relevant license file when a dependency or
-  asset license calls for it.
-- Keep sample artifacts linked through `protoraft.project.json` and run their
-  validator after changes.
-- Use fictional data in fixtures, generated assets, and screenshots. Keep
-  personal data and private reference material out of public artifacts.
-- Keep third-party notices and required license text with redistributed code,
-  icons, and generated artifacts that contain upstream material.
-- Label mocked or simplified behavior, document limitations, and claim only
-  capabilities demonstrated by the corresponding verification evidence.
+Run `pnpm dev` for the standalone workbench. The
+[browser regression test](README.md#verify-the-plugin-package) exercises the
+built MCP App. Use `examples/morrow` when testing a repository-backed workflow.
 
-## Verification
+## Submit a change
 
-Run `pnpm verify` before proposing a release or repository checkpoint.
+- Describe the workflow and expected behavior in your issue or pull request.
+- Keep application contracts and sample artifacts linked through
+  `protoraft.project.json`.
+- Cover behavior changes with a focused test and include screenshots for
+  changes to the workbench where they help.
+- Use material you have permission to redistribute and include its
+  required attribution.
+- Use fictional data or a minimal sample in logs and reproductions.
+
+See the [security policy](SECURITY.md) for vulnerability reports.

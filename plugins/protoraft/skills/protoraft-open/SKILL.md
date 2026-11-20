@@ -6,7 +6,7 @@ description: Open or launch the ProtoRaft product-design workbench for an existi
 # Open ProtoRaft
 
 1. Resolve the absolute root of the user-selected Git repository.
-2. Confirm it contains `protoraft.project.json`. ProtoRaft v0.1 does not
+2. Confirm it contains `protoraft.project.json`. The workbench does not
    initialize new projects. If the manifest is missing, explain that boundary
    and ask the user to select an existing ProtoRaft repository or the sample.
 3. Call `open_protoraft_workbench` with that absolute path as `rootPath`.

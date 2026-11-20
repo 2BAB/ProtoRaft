@@ -294,6 +294,66 @@ describe("ProjectStore", () => {
     }
   }, 10_000);
 
+  it("keeps fast-forward product decisions visible and exports the exact branch snapshot", async () => {
+    execFileSync("git", ["init", "-b", "main"], { cwd: root });
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
+    git("config", "user.name", "ProtoRaft Test");
+    git("config", "user.email", "test@example.com");
+    git("add", ".");
+    git("commit", "-m", "base");
+    const baseCommit = git("rev-parse", "HEAD");
+    git("switch", "-c", "feature/listen");
+    await writeFile(join(root, "documents/brief.md"), [
+      "# Feature",
+      "Keep playback running. Preserve literal $&.",
+      "![diagram][diagram]",
+      "",
+      "[diagram]: ../design/diagram.png",
+    ].join("\n"));
+    await writeFile(join(root, "design/diagram.png"), pixelPng);
+    git("add", ".");
+    git("commit", "-m", "proposal");
+
+    const store = new ProjectStore();
+    const { id } = await store.open(root);
+    const changed = await store.compareBranches(id, "main", "feature/listen");
+    expect(changed.possibleConflicts).toEqual([]);
+    const [, review] = await store.loadBranchReview(id, "main", "feature/listen");
+    expect(review?.changes.find((change) => change.path === "documents/brief.md")).toMatchObject({
+      kind: "modified", decisionRequired: true,
+      baseContent: expect.stringContaining("Original."),
+      compareContent: expect.stringContaining("Keep playback running."),
+    });
+    const decision = "Keep playback running on Story and Saved.";
+    const saved = await store.saveReviewDecision(id, {
+      base: "main", compare: "feature/listen", path: "documents/brief.md",
+      decision, expectedRevision: review!.decisionRevision!,
+    });
+    const [, updated] = await store.loadBranchReview(id, "main", "feature/listen");
+    expect(updated?.changes.find((change) => change.path === "documents/brief.md")?.decision).toBe(saved.decision);
+
+    const [, stale] = await store.listPublicationSources(id);
+    git("add", "collaboration/review-scenarios.json");
+    git("commit", "-m", "record decision");
+    await expect(store.loadProductionProject(id, stale)).rejects.toThrow("source branch changed");
+    const [production, branchReview] = await store.listPublicationSources(id);
+    expect(production?.commit).toBe(baseCommit);
+    expect(branchReview).toMatchObject({ kind: "branch-review", commit: git("rev-parse", "HEAD"), baseCommit });
+
+    await writeFile(join(root, "documents/brief.md"), "Uncommitted private material");
+    const template = join(root, "ui-template.html");
+    await writeFile(template, "<!doctype html><html><head></head><body></body></html>");
+    const exported = await prepareSiteExport({ store, projectId: id, uiTemplatePath: template, source: branchReview });
+    const html = await readFile(join(exported.sourceDirectory, "dist/static/index.html"), "utf8");
+    expect(exported).toMatchObject({ branch: "feature/listen", commit: branchReview?.commit });
+    expect(html).toContain(decision);
+    expect(html).toContain("Preserve literal $&.");
+    expect(html).not.toContain("Uncommitted private material");
+    expect(html).toContain('"design/diagram.png":"data:image/png;base64,');
+    expect(html).toContain('"assetPath":"screens/today/wireframe.png"');
+    expect(JSON.parse(await readFile(join(exported.sourceDirectory, "snapshot.json"), "utf8"))).toEqual(branchReview);
+  }, 10_000);
+
   it("limits writes to declared documents and detects revision conflicts", async () => {
     const store = new ProjectStore();
     const session = await store.open(root);
@@ -306,6 +366,7 @@ describe("ProjectStore", () => {
     );
 
     expect(first.previousRevision).toBe(hashContent(original));
+    await expect(store.saveDocument(session.id, "documents/brief.md", "Missing revision")).rejects.toThrow("revision is required");
     await expect(
       store.saveDocument(
         session.id,
@@ -344,6 +405,109 @@ describe("ProjectStore", () => {
         expectedRevision: project.discussionRevision,
       }),
     ).rejects.toThrow("REVISION_CONFLICT");
+  });
+
+  it("serializes revision checks across stores and keeps both notes after retry", async () => {
+    const left = new ProjectStore();
+    const right = new ProjectStore();
+    const session = await left.open(root);
+    await right.open(root);
+    const original = await left.loadProject(session.id);
+    const docRevision = original.documents[0]!.revision;
+    const noteRevision = original.discussionRevision;
+    const noteA = { screenId: "today", body: "First note", noteId: `note_${"a".repeat(32)}` };
+    const noteB = { screenId: "today", body: "Second note", noteId: `note_${"b".repeat(32)}` };
+
+    const docs = await Promise.allSettled([
+      left.saveDocument(session.id, "documents/brief.md", "First edit", docRevision),
+      right.saveDocument(session.id, "documents/brief.md", "Second edit", docRevision),
+    ]);
+    expect(docs.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(docs.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ message: expect.stringContaining("REVISION_CONFLICT") }),
+    });
+    const firstDocWon = docs[0]?.status === "fulfilled";
+    expect(await readFile(join(root, "documents/brief.md"), "utf8"))
+      .toBe(firstDocWon ? "First edit" : "Second edit");
+
+    const notes = await Promise.allSettled([
+      left.addDiscussionNote(session.id, { ...noteA, expectedRevision: noteRevision }),
+      right.addDiscussionNote(session.id, { ...noteB, expectedRevision: noteRevision }),
+    ]);
+    expect(notes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(notes.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ message: expect.stringContaining("REVISION_CONFLICT") }),
+    });
+    const pending = notes[0]?.status === "fulfilled" ? noteB : noteA;
+    const refreshed = await right.loadProject(session.id);
+    const retried = await right.addDiscussionNote(session.id, { ...pending, expectedRevision: refreshed.discussionRevision });
+    const duplicate = await left.addDiscussionNote(session.id, { ...pending, expectedRevision: noteRevision });
+    expect(duplicate.note).toEqual(retried.note);
+    expect((await left.loadProject(session.id)).discussions.map((note) => note.body).sort())
+      .toEqual(["First note", "Second note"]);
+  });
+
+  it("registers and connects a generated screen before reporting it complete", async () => {
+    const store = new ProjectStore();
+    const { id } = await store.open(root);
+    const input = { title: "Playback speed", purpose: "Choose the playback speed.", screenType: "Overlay state", sourceScreenId: "today" };
+    const queued = await store.createWireframeRequest(id, input);
+    const other = await store.createWireframeRequest(id, input);
+    expect(queued.id).not.toBe(other.id);
+    const retriedSubmission = await store.createWireframeRequest(id, { ...input, requestId: queued.id });
+    expect(retriedSubmission.id).toBe(queued.id);
+    expect(await store.listWireframeRequests(id)).toHaveLength(2);
+    const firstClaim = await store.claimWireframeRequest(id, queued.id, "agent-a");
+    const otherClaim = await store.claimWireframeRequest(id, other.id, "agent-b");
+    expect(otherClaim.id).toBe(other.id);
+
+    const screen = "screens/speed";
+    await mkdir(join(root, screen));
+    await writeFile(join(root, screen, "screen.json"), JSON.stringify({
+      id: "speed", title: input.title, purpose: input.purpose, route: "/speed", wireframe: "wireframe.png",
+    }));
+    const damagedPng = Buffer.from(pixelPng);
+    damagedPng[47] = damagedPng[47]! ^ 0xff;
+    await writeFile(join(root, screen, "wireframe.png"), damagedPng);
+    const output = {
+      claimToken: firstClaim.claimToken!, screenId: "speed",
+      screenDefinitionPath: `${screen}/screen.json`, wireframePath: `${screen}/wireframe.png`,
+    };
+    await expect(store.completeWireframeRequest(id, queued.id, output)).rejects.toThrow("PNG");
+    expect((await store.loadProject(id)).screens.map((item) => item.id)).toEqual(["today"]);
+    await store.failWireframeRequest(id, queued.id, firstClaim.claimToken!, "Image could not be generated.");
+    const reopened = new ProjectStore();
+    await reopened.open(root);
+    expect(await reopened.listWireframeRequests(id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: queued.id, status: "failed" }),
+      expect.objectContaining({ id: other.id, status: "claimed" }),
+    ]));
+    await reopened.retryWireframeRequest(id, queued.id);
+    const finalClaim = await reopened.claimWireframeRequest(id, queued.id, "agent-c");
+    await writeFile(join(root, screen, "wireframe.png"), pixelPng);
+    await expect(reopened.completeWireframeRequest(id, queued.id, output)).rejects.toThrow("token");
+    expect((await reopened.completeWireframeRequest(id, queued.id, {
+      ...output, claimToken: finalClaim.claimToken!,
+    })).status).toBe("completed");
+    const project = await store.loadProject(id);
+    expect(project.screens.map((item) => item.id)).toEqual(["today", "speed"]);
+    expect(project.connections).toContainEqual(expect.objectContaining({ source: "today", target: "speed" }));
+    const requests = await store.listWireframeRequests(id);
+    expect(requests.find((item) => item.id === queued.id)).toMatchObject({ status: "completed", availableOnCanvas: true, screenId: "speed" });
+    expect(requests.every((item) => !("claimToken" in item))).toBe(true);
+  });
+
+  it("shows expired claims as failed and recovers the same request ID", async () => {
+    const store = new ProjectStore();
+    const { id } = await store.open(root);
+    const queued = await store.createWireframeRequest(id, { title: "Search", purpose: "Find a story.", screenType: "Desktop screen" });
+    const claimed = await store.claimWireframeRequest(id, queued.id, "stopped-agent");
+    await writeFile(
+      join(root, ".protoraft/requests", `${queued.id}.json`),
+      JSON.stringify({ ...claimed, updatedAt: "2020-01-01T00:00:00.000Z" }),
+    );
+    expect((await store.listWireframeRequests(id))[0]).toMatchObject({ id: queued.id, status: "failed" });
+    expect(await store.retryWireframeRequest(id, queued.id)).toMatchObject({ id: queued.id, status: "queued" });
   });
 
   it("rejects traversal and symlinks that escape the project", async () => {
@@ -626,4 +790,58 @@ describe("ProjectStore", () => {
       )?.recommendation,
     ).toBe("Keep the feature intent with the main wording.");
   }, 10_000);
+
+  it("keeps project-relative paths for a project in a subdirectory and excludes root and sibling changes", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "protoraft-subdir-"));
+    try {
+      const projectRoot = join(repo, "examples/morrow");
+      await mkdir(projectRoot, { recursive: true });
+      await createFixture(projectRoot);
+
+      const git = (...args: string[]) =>
+        execFileSync("git", args, { cwd: repo });
+      await writeFile(join(repo, "README.md"), "# workspace\n");
+      await mkdir(join(repo, "examples/other"), { recursive: true });
+      await writeFile(join(repo, "examples/other/note.md"), "# other project\n");
+      git("init", "-b", "main");
+      git("config", "user.name", "ProtoRaft Test");
+      git("config", "user.email", "test@example.com");
+      git("add", ".");
+      git("commit", "-m", "fixture");
+
+      git("checkout", "-b", "feature/subdir");
+      await writeFile(
+        join(projectRoot, "documents/brief.md"),
+        "# Fixture\n\nSubdir change.\n",
+      );
+      await writeFile(join(repo, "README.md"), "# workspace changed\n");
+      await writeFile(
+        join(repo, "examples/other/note.md"),
+        "# other project changed\n",
+      );
+      git("add", ".");
+      git("commit", "-m", "mixed change");
+      git("checkout", "main");
+
+      const store = new ProjectStore();
+      const session = await store.open(projectRoot);
+      const comparison = await store.compareBranches(
+        session.id,
+        "main",
+        "feature/subdir",
+        false,
+      );
+      const paths = comparison.changedFiles.map((change) => change.path);
+
+      expect(comparison.changedFiles).toEqual([
+        { path: "documents/brief.md", kind: "modified" },
+      ]);
+      // repo-root change is excluded
+      expect(paths).not.toContain("README.md");
+      // sibling directory change is excluded
+      expect(paths).not.toContain("examples/other/note.md");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

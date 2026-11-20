@@ -5,24 +5,9 @@ description: Claim and complete one queued ProtoRaft wireframe request with a si
 
 # Generate an atomic wireframe
 
-1. Call `claim_wireframe_request` and retain its `claimToken`.
-2. Read the request's purpose, required elements, source screen, and constraints.
-3. Use ImageGen to create exactly one standalone screen or state in one
-   generation pass. Do not make variants unless the user explicitly asks.
-4. Reject any result that contains multiple screens, a storyboard, annotations,
-   flow arrows, perspective mockups, or decorative product-shot styling.
-5. Write a screen definition and its generated image inside the project.
-6. Call `complete_wireframe_request` with the same request ID and claim token,
-   plus `screenId`, `screenDefinitionPath`, and `wireframePath`.
-7. If the claim is stale, do not overwrite the newer result.
-8. Return the completed screen immediately so the team can discuss it; refine
-   only after the first review note or an explicit follow-up request.
+1. Call `claim_wireframe_request` with the project ID and request ID supplied by the workbench. If an ID is missing, use `list_wireframe_requests` when the project ID is known. Ask for the intended request when multiple entries match.
+2. Use the claimed purpose, format, and source screen to generate one wireframe with ImageGen. Read the source screen's definition from the project's declared flow when one was selected.
+3. Write the PNG and screen definition under the returned `rootPath` at the returned output paths. Those paths are unique to this attempt. Use the returned screen ID, a distinct route, and `wireframe: "wireframe.png"`. Record the user-facing title, purpose, and supported interactions in the definition.
+4. Call `complete_wireframe_request` with the same IDs, claim token, and output paths. The tool validates the files and adds the screen to the canvas. If generation or completion fails, call `fail_wireframe_request` with a short explanation so the user can retry from the workbench. A stale claim leaves later attempts in control.
 
-Default visual direction:
-
-- medium-fidelity grayscale product wireframe
-- one portrait mobile screen
-- white background, black and neutral gray only
-- clear hierarchy and realistic platform spacing
-- simple gray image placeholders
-- no gradients, shadows, textures, or brand imitation
+Use a medium-fidelity grayscale layout in the requested format. Create one screen or overlay with a clear hierarchy and simple placeholders. Keep storyboards, device frames, annotations, and alternative layouts out of the image.

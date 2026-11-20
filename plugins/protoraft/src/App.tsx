@@ -5,7 +5,7 @@ import {
   GitBranch,
   Settings,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   connectProtoRaftApp,
   type BridgeStatus,
@@ -24,9 +24,15 @@ import { Sidebar } from "./components/Sidebar";
 import { morrowProject } from "./data/morrow";
 import type {
   BranchChange,
+  BranchSnapshot,
+  PublicationSource,
   DesignWorkspaceView,
   DisplayMode,
   DiscussionNote,
+  DocumentWriteResult,
+  DocumentDraft,
+  ProductDocument,
+  WireframeRequestSummary,
   ProductWorkspaceView,
   PrototypeProject,
   ScreenId,
@@ -81,14 +87,26 @@ export default function App() {
   );
   const [displayMode, setDisplayMode] =
     useState<DisplayMode>(initialDisplayMode);
-  const [section, setSection] = useState<WorkspaceSection>("product");
+  const [section, setSection] = useState<WorkspaceSection>(
+    bootstrap?.project.publication?.kind === "branch-review" ? "collaboration" : "product",
+  );
   const [productView, setProductView] =
     useState<ProductWorkspaceView>("wireframes");
   const [designView, setDesignView] =
     useState<DesignWorkspaceView>("system");
   const [activePreview, setActivePreview] = useState<ScreenId>("today");
-  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generationSource, setGenerationSource] = useState<ScreenId | null>(null);
+  const [documentDrafts, setDocumentDrafts] = useState<Record<string, DocumentDraft>>({});
+  const [requests, setRequests] = useState<WireframeRequestSummary[]>([]);
+  const [dispatching, setDispatching] = useState<string | null>(null);
+  const [requestWarning, setRequestWarning] = useState("");
+  const [focusScreen, setFocusScreen] = useState<{ id: ScreenId } | null>(null);
+  const clearFocusedScreen = useCallback(() => setFocusScreen(null), []);
+  const [projectReady, setProjectReady] = useState(Boolean(bootstrap) || window.parent === window);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [publicationSources, setPublicationSources] = useState<PublicationSource[]>([]);
+  const [publicationError, setPublicationError] = useState("");
+  const [loadedDocumentAssets, setLoadedDocumentAssets] = useState<Record<string, string>>({});
   const [bridgeStatus, setBridgeStatus] =
     useState<BridgeStatus>(bootstrap ? "standalone" : "connecting");
   const bridgeRef = useRef<ProtoRaftBridge>(standaloneBridge);
@@ -103,6 +121,7 @@ export default function App() {
     connectProtoRaftApp((payload) => {
       if (active && payload.project) {
         setProject(payload.project);
+        setProjectReady(true);
       }
     }).then((bridge) => {
       if (!active) {
@@ -118,10 +137,10 @@ export default function App() {
   }, [directPreview]);
 
   useEffect(() => {
-    if (displayMode === "prod" && section === "collaboration") {
+    if (displayMode === "prod" && section === "collaboration" && project.publication?.kind !== "branch-review") {
       setSection("product");
     }
-  }, [displayMode, section]);
+  }, [displayMode, section, project.publication?.kind]);
 
   useEffect(() => {
     if (displayMode === "prod") {
@@ -148,7 +167,7 @@ export default function App() {
   }, [displayMode, settingsOpen]);
 
   useEffect(() => {
-    if (bridgeStatus !== "connected") {
+    if (bridgeStatus !== "connected" || !projectReady) {
       return;
     }
     const unresolved = project.screens.filter((screen) =>
@@ -182,7 +201,7 @@ export default function App() {
           id: screen.id,
           image: `data:${asset.mimeType};base64,${asset.data}`,
         };
-      }),
+      }).map((request) => request.catch(() => null)),
     ).then((assets) => {
       if (!active) {
         return;
@@ -204,13 +223,13 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [bridgeStatus, project.projectId, project.screens]);
+  }, [bridgeStatus, projectReady, project.projectId, project.screens]);
 
   useEffect(() => {
     if (
       directPreview ||
       displayMode === "prod" ||
-      bridgeStatus !== "connected"
+      bridgeStatus !== "connected" || !projectReady
     ) {
       return;
     }
@@ -249,7 +268,120 @@ export default function App() {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [bridgeStatus, directPreview, displayMode, project.projectId]);
+  }, [bridgeStatus, directPreview, displayMode, projectReady, project.projectId]);
+
+  useEffect(() => {
+    if (!projectReady || bridgeStatus !== "connected" || displayMode !== "local") return;
+
+    let active = true;
+    let refreshing = false;
+    let timer: number | undefined;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const payload = await bridgeRef.current.callTool("list_wireframe_requests", { projectId: project.projectId });
+        if (active && Array.isArray(payload?.requests)) {
+          setRequests(payload.requests as WireframeRequestSummary[]);
+          setRequestWarning("");
+        }
+      } catch {
+        if (active) setRequestWarning("Generation status is unavailable. Retrying…");
+      } finally {
+        refreshing = false;
+        if (active) timer = window.setTimeout(refresh, 2500);
+      }
+    };
+    void refresh();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [bridgeStatus, displayMode, projectReady, project.projectId]);
+
+  useEffect(() => {
+    if (!projectReady || bridgeStatus !== "connected" || displayMode !== "local") return;
+    const missing = requests.some((request) => request.status === "completed" && request.availableOnCanvas !== false &&
+      request.screenId && !project.screens.some((screen) => screen.id === request.screenId));
+    if (!missing) return;
+
+    let active = true;
+    void bridgeRef.current.callTool("get_protoraft_project", { projectId: project.projectId })
+      .then((payload) => {
+        const refreshed = payload?.project as PrototypeProject | undefined;
+        if (active && refreshed) {
+          setProject((current) => ({
+            ...current,
+            screens: refreshed.screens,
+            connections: refreshed.connections,
+          }));
+        }
+      })
+      .catch(() => {
+        if (active) setRequestWarning("The canvas could not refresh. Open the result to try again.");
+      });
+    return () => { active = false; };
+  }, [bridgeStatus, displayMode, projectReady, project.projectId, project.screens, requests]);
+
+  const listPublicationSources = useCallback(async () => {
+    try {
+      const payload = await bridgeRef.current.callTool("list_protoraft_publication_sources", { projectId: project.projectId });
+      if (!Array.isArray(payload?.sources)) throw new Error("Could not load Git revisions.");
+      setPublicationSources(payload.sources as PublicationSource[]);
+      setPublicationError("");
+    } catch (error) {
+      setPublicationSources([]);
+      setPublicationError(error instanceof Error ? error.message : "Could not load Git revisions.");
+    }
+  }, [project.projectId]);
+
+  useEffect(() => {
+    if (!settingsOpen || !projectReady || bridgeStatus !== "connected") return;
+    void listPublicationSources();
+  }, [settingsOpen, projectReady, bridgeStatus, listPublicationSources]);
+
+  useEffect(() => {
+    if (!projectReady || bridgeStatus !== "connected" || displayMode === "prod") return;
+    const screenPaths = new Set(project.screens.map((screen) => screen.assetPath));
+    const paths = project.documentAssetPaths?.filter((path) => !screenPaths.has(path)) ?? [];
+    let active = true;
+    void Promise.all(paths.map(async (path) => {
+      try {
+        const payload = await bridgeRef.current.callTool("get_protoraft_asset", { projectId: project.projectId, path });
+        const asset = payload?.asset as { data?: string; mimeType?: string } | undefined;
+        return asset?.data && asset.mimeType ? [path, `data:${asset.mimeType};base64,${asset.data}`] : null;
+      } catch {
+        return null;
+      }
+    })).then((assets) => {
+      if (active) setLoadedDocumentAssets(Object.fromEntries(assets.filter((entry) => entry !== null)));
+    });
+    return () => { active = false; };
+  }, [bridgeStatus, displayMode, project.documentAssetPaths, project.projectId, project.screens, projectReady]);
+
+  const documentAssets = useMemo(() => {
+    const assets = { ...(displayMode === "local" ? loadedDocumentAssets : project.documentAssets) };
+    for (const screen of project.screens) {
+      if (screen.assetPath && screen.image.startsWith("data:")) assets[screen.assetPath] = screen.image;
+    }
+    return assets;
+  }, [displayMode, loadedDocumentAssets, project.documentAssets, project.screens]);
+
+  const baseCommit = project.branches[0]?.fullCommit;
+  const compareCommit = project.branches[1]?.fullCommit;
+  const loadBranchImages = useCallback(async (change: BranchChange) => {
+    const payload = await bridgeRef.current.callTool("get_protoraft_branch_images", {
+      projectId: project.projectId,
+      base: baseCommit,
+      compare: compareCommit,
+      path: change.path,
+      previousPath: change.previousPath,
+    });
+    return {
+      baseImage: typeof payload?.baseImage === "string" ? payload.baseImage : undefined,
+      compareImage: typeof payload?.compareImage === "string" ? payload.compareImage : undefined,
+    };
+  }, [project.projectId, baseCommit, compareCommit]);
 
   if (directPreview) {
     return <DirectMorrowPreview />;
@@ -273,106 +405,202 @@ export default function App() {
     }
   };
 
-  const generateScreen = async (request: GenerateScreenRequest) => {
-    if (displayMode === "prod") {
-      return;
-    }
-    if (bridgeRef.current.status === "connected") {
-      try {
-        await bridgeRef.current.callTool("create_wireframe_request", {
-          projectId: project.projectId,
-          title: request.title,
-          purpose: request.purpose,
-          screenType: request.screenType,
-        });
-        await recordHostEvent("generate-wireframe", "started");
-        const sent = await bridgeRef.current.askAgent(
-          `Generate the queued ProtoRaft wireframe "${request.title}". Read the generate-wireframe skill, claim the request, create exactly one atomic screen image, and complete the request.`,
-        );
-        await recordHostEvent(
-          "generate-wireframe",
-          sent ? "accepted" : "rejected",
-        );
-        setToast(
-          sent
-            ? "Generation request sent to Codex."
-            : "Codex could not receive the generation request.",
-        );
-      } catch {
-        await recordHostEvent("generate-wireframe", "rejected");
-        setToast("The generation request could not be prepared.");
-      }
-      return;
-    }
-
-    setToast("Generation request staged in local preview.");
+  const recordRequest = (request: WireframeRequestSummary) => {
+    setRequests((current) => [request, ...current.filter((item) => item.id !== request.id)]);
   };
 
-  const addDiscussion = async (screenId: ScreenId, body: string) => {
-    if (displayMode === "prod") {
-      return;
-    }
-    let note: DiscussionNote = {
-      id: `local_${Date.now()}`,
-      screenId,
-      author: "You",
-      body,
-      createdAt: new Date().toISOString(),
-    };
-    let revision = project.discussionRevision;
-
-    if (bridgeRef.current.status === "connected") {
-      const payload = await bridgeRef.current.callTool(
-        "add_protoraft_discussion_note",
-        {
-          projectId: project.projectId,
-          screenId,
-          body,
-          author: "You",
-          expectedRevision: project.discussionRevision,
-        },
+  const sendGenerationRequest = async (request: WireframeRequestSummary) => {
+    await recordHostEvent("generate-wireframe", "started");
+    try {
+      const sent = await bridgeRef.current.askAgent(
+        `Generate the ProtoRaft wireframe for projectId ${project.projectId} and requestId ${request.id}. Read the generate-wireframe skill and claim this exact request. Use the purpose and format from the claimed request, then complete it or report failure using its claim token.`,
       );
-      const saved = payload?.saved as
-        | { note?: DiscussionNote; revision?: string }
-        | undefined;
-      if (saved?.note) {
-        note = saved.note;
-        revision = saved.revision;
+      if (!sent) throw new Error("Codex did not accept the message.");
+      await recordHostEvent("generate-wireframe", "accepted");
+    } catch (error) {
+      await recordHostEvent("generate-wireframe", "rejected");
+      throw new Error("The request is queued. Select Send to Codex to send it again.", { cause: error });
+    }
+  };
+
+  const generateScreen = async (input: GenerateScreenRequest) => {
+    setToast("");
+    const payload = await bridgeRef.current.callTool("create_wireframe_request", {
+      projectId: project.projectId,
+      ...input,
+      sourceScreenId: generationSource ?? undefined,
+    });
+    const request = payload?.request as WireframeRequestSummary | undefined;
+    if (!request) throw new Error("The server did not confirm the queued request.");
+    recordRequest(request);
+    if (request.status !== "queued") return;
+    try {
+      await sendGenerationRequest(request);
+      setToast("Generation request sent to Codex.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "The request is queued.");
+    }
+  };
+
+  const retryGeneration = async (request: WireframeRequestSummary) => {
+    setDispatching(request.id);
+    try {
+      if (request.status === "failed") {
+        const payload = await bridgeRef.current.callTool("retry_wireframe_request", {
+          projectId: project.projectId,
+          requestId: request.id,
+        });
+        const updated = payload?.request as WireframeRequestSummary | undefined;
+        if (!updated) throw new Error("The server did not confirm the retry.");
+        recordRequest(updated);
+      }
+      await sendGenerationRequest(request);
+      setToast("Generation request sent to Codex.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not send the request.");
+    } finally {
+      setDispatching(null);
+    }
+  };
+
+  const openGeneratedScreen = async (screenId: ScreenId) => {
+    try {
+      if (!project.screens.some((screen) => screen.id === screenId)) {
+        const payload = await bridgeRef.current.callTool("get_protoraft_project", { projectId: project.projectId });
+        const refreshed = payload?.project as PrototypeProject | undefined;
+        if (!refreshed?.screens.some((screen) => screen.id === screenId)) {
+          throw new Error("This result is missing from the current branch’s canvas.");
+        }
+        setProject((current) => ({ ...current, screens: refreshed.screens, connections: refreshed.connections }));
+      }
+      setFocusScreen({ id: screenId });
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not open the result.");
+    }
+  };
+
+  const addDiscussion = async (screenId: ScreenId, body: string, noteId: string) => {
+    setToast("");
+    if (bridgeStatus === "standalone") {
+      const note: DiscussionNote = { id: noteId, screenId, body, author: "You", createdAt: new Date().toISOString() };
+      setProject((current) => ({ ...current, discussions: [...current.discussions, note] }));
+      setToast("Note added to this preview. It will reset on reload.");
+      return;
+    }
+
+    try {
+      const payload = await bridgeRef.current.callTool("add_protoraft_discussion_note", {
+        projectId: project.projectId,
+        screenId,
+        body,
+        noteId,
+        author: "You",
+        expectedRevision: project.discussionRevision,
+      });
+      const saved = payload?.saved as { note?: DiscussionNote; revision?: string } | undefined;
+      if (!saved?.note || !saved.revision) throw new Error("The server did not confirm the note.");
+      const note = saved.note;
+      setProject((current) => ({
+        ...current,
+        discussions: [...current.discussions.filter((item) => item.id !== note.id), note],
+        discussionRevision: saved.revision,
+      }));
+      setToast("Discussion note added.");
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("REVISION_CONFLICT")) throw error;
+
+      const payload = await bridgeRef.current.callTool("get_protoraft_project", { projectId: project.projectId });
+      const latest = payload?.project as PrototypeProject | undefined;
+      if (!latest) throw new Error("Could not reload the discussion. Your draft is still here.");
+      setProject((current) => ({
+        ...current,
+        discussions: latest.discussions,
+        discussionRevision: latest.discussionRevision,
+      }));
+      throw new Error("The discussion changed. Review the latest notes and add your draft again.");
+    }
+  };
+
+  const saveDocument = async (id: string, content: string, expectedRevision?: string): Promise<DocumentWriteResult> => {
+    setToast("");
+    const document = project.documents.find((item) => item.id === id);
+    if (!document) throw new Error("This document is no longer available.");
+    let savedRevision = document.revision;
+    let assetPaths: string[] = [];
+    if (bridgeStatus === "connected") {
+      if (!expectedRevision) throw new Error("Reload this document before saving.");
+      try {
+        const payload = await bridgeRef.current.callTool("save_protoraft_document", {
+          projectId: project.projectId,
+          path: document.filename,
+          content,
+          expectedRevision,
+        });
+        const saved = payload?.saved as { revision?: string; assetPaths?: string[] } | undefined;
+        if (!saved?.revision) throw new Error("The server did not confirm the save.");
+        savedRevision = saved.revision;
+        assetPaths = saved.assetPaths ?? [];
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("REVISION_CONFLICT")) throw error;
+        const payload = await bridgeRef.current.callTool("get_protoraft_project", { projectId: project.projectId });
+        const refreshed = payload?.project as { documents: ProductDocument[] } | undefined;
+        const latest = refreshed?.documents.find((item) => item.id === id);
+        if (!latest) throw new Error("Could not reload the document. Your draft is still here.");
+        setProject((current) => ({
+          ...current,
+          documents: current.documents.map((item) => item.id === id ? latest : item),
+        }));
+        return { status: "conflict", latest };
       }
     }
 
     setProject((current) => ({
       ...current,
-      discussions: [...current.discussions, note],
-      discussionRevision: revision,
-    }));
-    setToast("Discussion note added.");
-  };
-
-  const saveDocument = async (id: string, content: string) => {
-    if (displayMode === "prod") {
-      return;
-    }
-    const document = project.documents.find((item) => item.id === id);
-    if (!document) {
-      return;
-    }
-
-    setProject((current) => ({
-      ...current,
+      documentAssetPaths: assetPaths.length
+        ? [...new Set([...(current.documentAssetPaths ?? []), ...assetPaths])]
+        : current.documentAssetPaths,
       documents: current.documents.map((item) =>
-        item.id === id ? { ...item, content, updatedAt: "Just now" } : item,
+        item.id === id ? { ...item, content, revision: savedRevision, updatedAt: "Just now" } : item,
       ),
     }));
+    setToast(bridgeStatus === "standalone" ? "Saved to this preview until reload." : "Document saved.");
+    return { status: "saved" };
+  };
 
-    if (bridgeRef.current.status === "connected") {
-      await bridgeRef.current.callTool("save_protoraft_document", {
-        projectId: project.projectId,
-        path: document.filename,
-        content,
-      });
-    }
-    setToast("Document saved.");
+  const scanBranches = async () => {
+    const [base, compare] = project.branches;
+    if (!base || !compare) throw new Error("Two branches are required.");
+    const payload = await bridgeRef.current.callTool("compare_protoraft_branches", {
+      projectId: project.projectId,
+      base: base.gitRef ?? base.name,
+      compare: compare.gitRef ?? compare.name,
+      scanConflicts: true,
+      includeReview: true,
+    });
+    if (!Array.isArray(payload?.branches)) throw new Error("The comparison was not returned.");
+    const branches = payload.branches as BranchSnapshot[];
+    setProject((current) => ({ ...current, branches }));
+    setToast("Branch comparison refreshed.");
+  };
+
+  const saveReviewDecision = async (change: BranchChange, decision: string) => {
+    const [base, compare] = project.branches;
+    if (!base || !compare?.decisionRevision) throw new Error("Rescan before recording a decision.");
+    const payload = await bridgeRef.current.callTool("save_protoraft_review_decision", {
+      projectId: project.projectId, base: base.name, compare: compare.name,
+      path: change.path, decision, expectedRevision: compare.decisionRevision,
+    });
+    const saved = payload?.saved as { decision: string; revision: string } | undefined;
+    if (!saved?.revision) throw new Error("The server did not confirm the decision.");
+    setProject((current) => ({
+      ...current,
+      branches: current.branches.map((branch) => branch.name === compare.name ? {
+        ...branch,
+        decisionRevision: saved.revision,
+        changes: branch.changes.map((item) => item.path === change.path ? { ...item, decision: saved.decision } : item),
+      } : branch),
+    }));
+    setToast("Product decision saved to the repository.");
   };
 
   const resolveChange = async (change: BranchChange) => {
@@ -387,7 +615,7 @@ export default function App() {
     await recordHostEvent("review-conflict", "started");
     try {
       const sent = await bridgeRef.current.askAgent(
-        `Review the ProtoRaft conflict in ${change.path} between ${base?.gitRef ?? base?.name ?? "the base branch"} and ${compare?.gitRef ?? compare?.name ?? "the comparison branch"}. ${change.summary}${recommendation} Read AGENTS.md and the repository's collaboration scenario, inspect both branch versions and related artifacts, explain the product impact in plain language, then propose the smallest coherent resolution. Do not write, merge, commit, or push until the user confirms.`,
+        `Review the ProtoRaft change in ${change.path} between ${base?.gitRef ?? base?.name ?? "the base branch"} and ${compare?.gitRef ?? compare?.name ?? "the comparison branch"}. ${change.summary}${recommendation} Read AGENTS.md and the repository's collaboration scenario, inspect both branch versions and related artifacts, explain the product impact in plain language, then propose the smallest coherent resolution. Do not write, merge, commit, or push until the user confirms.`,
       );
       await recordHostEvent(
         "review-conflict",
@@ -434,6 +662,8 @@ export default function App() {
 
   const repositoryName = project.repositoryName ?? project.name;
   const readOnly = displayMode === "prod";
+  const sharedReview = project.publication?.kind === "branch-review";
+  const liveReview = !readOnly && bridgeStatus === "connected";
   const branchChangeCount = project.branches
     .slice(1)
     .reduce((total, branch) => total + branch.changes.length, 0);
@@ -521,62 +751,46 @@ export default function App() {
     }
   };
 
-  const publishCurrentProject = async () => {
-    if (bridgeRef.current.status !== "connected") {
-      setToast("Publishing is available from the installed Codex plugin.");
-      return;
-    }
-
+  const publishCurrentProject = async (source: PublicationSource) => {
     let handoffStarted = false;
     try {
-      const payload = await bridgeRef.current.callTool(
-        "prepare_protoraft_site",
-        { projectId: project.projectId },
-      );
-      const site = payload?.site as
-        | {
-            sourceDirectory?: unknown;
-            branch?: unknown;
-            projectName?: unknown;
-          }
-        | undefined;
-      if (
-        typeof site?.sourceDirectory !== "string" ||
-        typeof site.branch !== "string"
-      ) {
-        throw new Error("Site export was unavailable.");
+      const payload = await bridgeRef.current.callTool("prepare_protoraft_site", { projectId: project.projectId, source });
+      const site = payload?.site as { sourceDirectory?: string; branch?: string; commit?: string; projectName?: string } | undefined;
+      if (!site?.sourceDirectory || site.branch !== source.branch || site.commit !== source.commit) {
+        throw new Error("The export does not match the selected Git revision.");
       }
 
       await recordHostEvent("publish-site", "started");
       handoffStarted = true;
       const sent = await bridgeRef.current.askAgent(
-        `Publish the prepared ProtoRaft production site at ${JSON.stringify(site.sourceDirectory)} using Codex Sites. It is a self-contained, read-only export of ${JSON.stringify(String(site.projectName ?? project.name))} from ${JSON.stringify(site.branch)}. Read the ProtoRaft publish-site skill, preserve the prepared Production UI, run its build, create or reuse a Sites project, and deploy with an access level suitable for sharing the review site with other people while following any required approval flow. Return the deployed URL. Do not publish the local editable workbench or another branch.`,
+        `Use the ProtoRaft publish-site skill to publish the prepared read-only ${source.kind} at ${JSON.stringify(site.sourceDirectory)}. Expected branch: ${JSON.stringify(source.branch)}. Expected Git commit: ${source.commit}. Verify the prepared snapshot metadata matches before deploying. Follow the access and approval flow and return the deployed URL.`,
       );
-      await recordHostEvent(
-        "publish-site",
-        sent ? "accepted" : "rejected",
-      );
-      if (sent) {
-        setSettingsOpen(false);
-      }
-      setToast(
-        sent
-          ? "Site publish request sent to Codex."
-          : "Site publish request could not be sent.",
-      );
-    } catch {
-      if (handoffStarted) {
-        await recordHostEvent("publish-site", "rejected");
-      }
-      setToast("The production site could not be prepared.");
+      await recordHostEvent("publish-site", sent ? "accepted" : "rejected");
+      if (!sent) throw new Error("Codex did not receive the publish request. You can try again.");
+      setSettingsOpen(false);
+      setToast("Site publish request sent to Codex.");
+    } catch (error) {
+      if (handoffStarted) await recordHostEvent("publish-site", "rejected");
+      void listPublicationSources();
+      throw error;
     }
   };
+
+  if (!projectReady || bridgeStatus === "error" || bridgeStatus === "connecting") {
+    return (
+      <main className="workspace-view" role="status">
+        <h1>ProtoRaft</h1>
+        <p>{bridgeStatus === "error" ? "Could not connect to Codex. Open the project again from the chat." : "Opening the repository…"}</p>
+      </main>
+    );
+  }
 
   return (
     <div className={`app-shell app-shell--${displayMode}`}>
       <Sidebar
         activeSection={section}
         displayMode={displayMode}
+        showSharedReview={sharedReview}
         reviewAttention={reviewAttention}
         showSettings={!modeLocked}
         onSectionChange={setSection}
@@ -589,6 +803,7 @@ export default function App() {
             <div className="production-project-name">
               <strong>{project.name}</strong>
               <small>v{project.version}</small>
+              {project.publication && <code title={project.publication.commit}>{project.publication.branch} · {project.publication.commit.slice(0, 7)}</code>}
             </div>
             <div className="production-topbar-actions">
               <span>
@@ -618,7 +833,15 @@ export default function App() {
               readOnly={readOnly}
               activeWorkspaceView={productView}
               onWorkspaceViewChange={setProductView}
-              onGenerate={() => setGenerateOpen(true)}
+              canGenerate={bridgeStatus === "connected"}
+              requests={requests}
+              requestWarning={requestWarning}
+              dispatching={dispatching}
+              focusScreen={focusScreen}
+              onResultFocused={clearFocusedScreen}
+              onGenerate={setGenerationSource}
+              onRetryGeneration={retryGeneration}
+              onOpenResult={openGeneratedScreen}
               onAddDiscussion={addDiscussion}
             />
           )}
@@ -629,6 +852,10 @@ export default function App() {
               readOnly={readOnly}
               activeWorkspaceView={productView}
               onWorkspaceViewChange={setProductView}
+              temporary={bridgeStatus === "standalone"}
+              assets={documentAssets}
+              drafts={documentDrafts}
+              setDrafts={setDocumentDrafts}
               onSave={saveDocument}
             />
           )}
@@ -652,11 +879,14 @@ export default function App() {
               onScreenChange={setActivePreview}
             />
           )}
-          {!readOnly && section === "collaboration" && (
+          {(!readOnly || sharedReview) && section === "collaboration" && (
             <CollaborationView
               branches={project.branches}
-              onResolve={resolveChange}
-              onNotify={setToast}
+              readOnly={!liveReview}
+              onScan={liveReview ? scanBranches : undefined}
+              onImages={liveReview && baseCommit && compareCommit ? loadBranchImages : undefined}
+              onResolve={liveReview ? resolveChange : undefined}
+              onSaveDecision={liveReview ? saveReviewDecision : undefined}
             />
           )}
         </main>
@@ -687,9 +917,7 @@ export default function App() {
                 <CheckCircle2 size={15} />
                 {bridgeStatus === "connected"
                   ? "Connected"
-                  : bridgeStatus === "connecting"
-                    ? "Connecting"
-                    : "Preview data"}
+                  : "Preview data"}
               </span>
             </div>
           </footer>
@@ -698,8 +926,8 @@ export default function App() {
 
       {!readOnly && (
         <GenerateScreenDialog
-          open={generateOpen}
-          onClose={() => setGenerateOpen(false)}
+          open={generationSource !== null}
+          onClose={() => setGenerationSource(null)}
           onSubmit={generateScreen}
         />
       )}
@@ -715,6 +943,9 @@ export default function App() {
           schedulingAvailable={bridgeStatus === "connected"}
           onClose={() => setSettingsOpen(false)}
           onDisplayModeChange={changeDisplayMode}
+          publicationAvailable={bridgeStatus === "connected"}
+          publicationSources={publicationSources}
+          publicationError={publicationError}
           onPublish={publishCurrentProject}
           onRequestSchedule={requestScheduledReview}
         />

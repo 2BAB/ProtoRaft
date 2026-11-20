@@ -4,7 +4,7 @@ export type DesignWorkspaceView = "system" | "preview";
 export type DisplayMode = "local" | "prod";
 
 export type WireframeViewMode = "map" | "list";
-export type ScreenId = "today" | "story" | "focus" | "listen" | "saved";
+export type ScreenId = string;
 
 export interface PrototypeAction {
   label: string;
@@ -27,6 +27,7 @@ export interface PrototypeScreen {
   actions: PrototypeAction[];
   states: string[];
   linkedDocumentIds: string[];
+  assetPath?: string;
   updatedAt: string;
 }
 
@@ -44,6 +45,7 @@ export interface ProductDocument {
   summary: string;
   content: string;
   screenIds: ScreenId[];
+  revision?: string;
   updatedAt: string;
   status: "draft" | "review" | "approved";
 }
@@ -82,6 +84,13 @@ export interface BranchChange {
   baseContent?: string;
   compareContent?: string;
   recommendation?: string;
+  resolutionCriteria?: string[];
+  decision?: string;
+  decisionRequired?: boolean;
+  baseImage?: string;
+  image?: boolean;
+  previousPath?: string;
+  compareImage?: string;
 }
 
 export interface BranchSnapshot {
@@ -90,8 +99,11 @@ export interface BranchSnapshot {
   label: string;
   author: string;
   commit: string;
+  fullCommit?: string;
   updatedAt: string;
   changes: BranchChange[];
+  reviewTitle?: string;
+  decisionRevision?: string;
 }
 
 export interface ReviewStatus {
@@ -99,6 +111,14 @@ export interface ReviewStatus {
   checkedAt?: string;
   summary?: string;
   changedArtifacts?: number;
+}
+
+export interface PublicationSource {
+  kind: "production" | "branch-review";
+  branch: string;
+  commit: string;
+  baseBranch?: string;
+  baseCommit?: string;
 }
 
 export interface PrototypeProject {
@@ -117,7 +137,30 @@ export interface PrototypeProject {
   components: ComponentContract[];
   branches: BranchSnapshot[];
   reviewStatus?: ReviewStatus;
+  documentAssetPaths?: string[];
+  documentAssets?: Record<string, string>;
+  publication?: PublicationSource;
 }
+
+export interface WireframeRequestSummary {
+  id: string;
+  title: string;
+  status: "queued" | "claimed" | "completed" | "failed";
+  screenId?: ScreenId;
+  availableOnCanvas?: boolean;
+  error?: string;
+}
+
+export interface DocumentDraft {
+  content: string;
+  revision?: string;
+  latest?: ProductDocument;
+  error?: string;
+}
+
+export type DocumentWriteResult =
+  | { status: "saved" }
+  | { status: "conflict"; latest: ProductDocument };
 
 export interface ToolProjectPayload {
   project?: PrototypeProject;

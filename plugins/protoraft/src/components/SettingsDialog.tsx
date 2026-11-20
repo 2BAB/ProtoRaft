@@ -7,7 +7,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
-import type { DisplayMode, ReviewStatus } from "../types";
+import type { DisplayMode, PublicationSource, ReviewStatus } from "../types";
 
 export type ScheduledReviewCadence = "daily" | "weekdays" | "weekly";
 export type ScheduledReviewEnvironment = "worktree" | "local";
@@ -29,7 +29,10 @@ interface SettingsDialogProps {
   schedulingAvailable: boolean;
   onClose: () => void;
   onDisplayModeChange: (mode: DisplayMode) => Promise<void>;
-  onPublish: () => Promise<void>;
+  publicationAvailable: boolean;
+  publicationSources: PublicationSource[];
+  publicationError: string;
+  onPublish: (source: PublicationSource) => Promise<void>;
   onRequestSchedule: (request: ScheduledReviewRequest) => Promise<boolean>;
 }
 
@@ -59,6 +62,9 @@ export function SettingsDialog({
   schedulingAvailable,
   onClose,
   onDisplayModeChange,
+  publicationAvailable,
+  publicationSources,
+  publicationError,
   onPublish,
   onRequestSchedule,
 }: SettingsDialogProps) {
@@ -70,6 +76,9 @@ export function SettingsDialog({
   const [submitting, setSubmitting] = useState(false);
   const [changingMode, setChangingMode] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [publicationKind, setPublicationKind] = useState<PublicationSource["kind"]>("production");
+  const [publishFailure, setPublishFailure] = useState("");
+  const source = publicationSources.find((item) => item.kind === publicationKind) ?? publicationSources[0];
   const timezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
 
@@ -78,6 +87,7 @@ export function SettingsDialog({
       setSubmitting(false);
       setChangingMode(false);
       setPublishing(false);
+      setPublishFailure("");
     }
   }, [open]);
 
@@ -126,9 +136,13 @@ export function SettingsDialog({
   };
 
   const publish = async () => {
+    if (!source) return;
     setPublishing(true);
+    setPublishFailure("");
     try {
-      await onPublish();
+      await onPublish(source);
+    } catch (error) {
+      setPublishFailure(error instanceof Error ? error.message : "Could not prepare the selected snapshot.");
     } finally {
       setPublishing(false);
     }
@@ -208,21 +222,32 @@ export function SettingsDialog({
                 Codex Sites
               </span>
             </div>
-            <div className="settings-publish-row">
-              <div>
-                <strong>{repositoryName}</strong>
-                <small>Production · {defaultBranch}</small>
-              </div>
-              <button
-                type="button"
-                className="button button--primary"
-                disabled={publishing}
-                onClick={() => void publish()}
-              >
-                <Rocket size={16} />
-                {publishing ? "Preparing" : "Publish current project"}
-              </button>
-            </div>
+            {publicationAvailable ? (
+              <>
+                <div className="settings-publish-row">
+                  <label className="settings-select-control">
+                    <span>Git snapshot</span>
+                    <select value={source?.kind ?? ""} disabled={!source || publishing}
+                      onChange={(event) => setPublicationKind(event.target.value as PublicationSource["kind"])}>
+                      {!source && <option value="">{publicationError ? "Unavailable" : "Loading revisions…"}</option>}
+                      {publicationSources.map((item) => (
+                        <option key={item.kind} value={item.kind}>
+                          {item.kind === "production" ? "Production" : "Branch review"} · {item.branch} · {item.commit.slice(0, 7)}
+                        </option>
+                      ))}
+                    </select>
+                    {source && <small title={source.commit}>Commit <code>{source.commit.slice(0, 12)}</code>{source.baseBranch && ` · compared with ${source.baseBranch} (${source.baseCommit?.slice(0, 7)})`}</small>}
+                  </label>
+                  <button type="button" className="button button--primary" disabled={publishing || !source}
+                    onClick={() => void publish()}>
+                    <Rocket size={16} />
+                    {publishing ? "Preparing" : "Publish snapshot"}
+                  </button>
+                </div>
+                {source && <small>Only committed changes are included in the snapshot.</small>}
+                {(publishFailure || publicationError) && <p className="write-feedback" role="alert">{publishFailure || publicationError}</p>}
+              </>
+            ) : <small>Open this project in Codex to publish a snapshot.</small>}
           </section>
 
           {displayMode === "local" && (

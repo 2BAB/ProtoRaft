@@ -126,9 +126,15 @@ describe("ProtoRaft MCP server", () => {
         "save_protoraft_document",
         "add_protoraft_discussion_note",
         "create_wireframe_request",
+        "list_wireframe_requests",
+        "retry_wireframe_request",
+        "fail_wireframe_request",
         "claim_wireframe_request",
         "complete_wireframe_request",
         "compare_protoraft_branches",
+        "get_protoraft_branch_images",
+        "save_protoraft_review_decision",
+        "list_protoraft_publication_sources",
       ]),
     );
 

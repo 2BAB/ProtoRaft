@@ -1,11 +1,11 @@
 {
   "name": "protoraft",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "Turn a product idea into a discussion-ready wireframe, shared design core, and implementation preview.",
   "author": {
     "name": "2BAB"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "product-design",
     "wireframes",
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "ProtoRaft",
     "shortDescription": "Go from a quick wireframe to a shared design core.",
-    "longDescription": "ProtoRaft gives product and marketing teams a Codex-native workbench for one-minute atomic wireframes with discussion notes, lightweight product documents, design tokens, component contracts, HiFi previews, native core sync, and Git-based review.",
+    "longDescription": "ProtoRaft gives product and marketing teams a Codex-native workbench for wireframes with discussion notes, lightweight product documents, design tokens, component contracts, HiFi previews, native core sync, and Git-based review.",
     "developerName": "2BAB",
     "category": "Productivity",
     "brandColor": "#111111",

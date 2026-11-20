@@ -6,11 +6,13 @@ import {
   Link2,
   Save,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { MarkdownDocument } from "../components/MarkdownDocument";
 import { WorkspaceSubnav } from "../components/WorkspaceSubnav";
 import type {
   ProductDocument,
+  DocumentWriteResult,
+  DocumentDraft,
   ProductWorkspaceView,
   PrototypeScreen,
 } from "../types";
@@ -21,7 +23,11 @@ interface DocumentsViewProps {
   readOnly: boolean;
   activeWorkspaceView: ProductWorkspaceView;
   onWorkspaceViewChange: (view: ProductWorkspaceView) => void;
-  onSave: (id: string, content: string) => Promise<void>;
+  temporary: boolean;
+  assets: Record<string, string>;
+  drafts: Record<string, DocumentDraft>;
+  setDrafts: Dispatch<SetStateAction<Record<string, DocumentDraft>>>;
+  onSave: (id: string, content: string, revision?: string) => Promise<DocumentWriteResult>;
 }
 
 const productWorkspaceItems: Array<{
@@ -38,6 +44,10 @@ export function DocumentsView({
   readOnly,
   activeWorkspaceView,
   onWorkspaceViewChange,
+  temporary,
+  assets,
+  drafts,
+  setDrafts,
   onSave,
 }: DocumentsViewProps) {
   const [selectedId, setSelectedId] = useState(documents[0]?.id ?? "");
@@ -47,14 +57,12 @@ export function DocumentsView({
       documents.find((document) => document.id === selectedId) ?? documents[0],
     [documents, selectedId],
   );
-  const [draft, setDraft] = useState(selectedDocument?.content ?? "");
   const [saving, setSaving] = useState(false);
   const [showLinked, setShowLinked] = useState(false);
 
   useEffect(() => {
-    setDraft(selectedDocument?.content ?? "");
     setShowLinked(false);
-  }, [selectedDocument]);
+  }, [selectedDocument?.id]);
 
   useEffect(() => {
     if (readOnly) {
@@ -69,17 +77,40 @@ export function DocumentsView({
   const linkedScreens = screens.filter((screen) =>
     selectedDocument.screenIds.includes(screen.id),
   );
+  const editing = readOnly ? undefined : drafts[selectedDocument.id];
+  const draft = editing?.content ?? selectedDocument.content;
   const dirty = draft !== selectedDocument.content;
-
-  const handleSave = async () => {
-    if (!dirty) {
-      return;
-    }
-    setSaving(true);
-    await onSave(selectedDocument.id, draft);
-    setSaving(false);
+  const updateDraft = (content: string) => {
+    setDrafts((current) => ({
+      ...current,
+      [selectedDocument.id]: { revision: selectedDocument.revision, ...current[selectedDocument.id], content },
+    }));
   };
 
+  const handleSave = async () => {
+    if (!dirty || !editing || editing.latest) return;
+
+    const id = selectedDocument.id;
+    setSaving(true);
+    try {
+      const result = await onSave(id, draft, editing.revision);
+      setDrafts((current) => {
+        if (result.status === "conflict") {
+          return { ...current, [id]: { ...editing, error: undefined, latest: result.latest } };
+        }
+        const updated = { ...current };
+        delete updated[id];
+        return updated;
+      });
+    } catch (error) {
+      setDrafts((current) => ({
+        ...current,
+        [id]: { ...editing, error: error instanceof Error ? error.message : "Could not save your draft." },
+      }));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <section className="workspace-view documents-view">
       <header className="view-header">
@@ -120,7 +151,7 @@ export function DocumentsView({
             <button
               type="button"
               className="button button--primary"
-              disabled={!dirty || saving}
+              disabled={!dirty || saving || Boolean(editing?.latest)}
               onClick={handleSave}
             >
               <Save size={15} />
@@ -174,7 +205,7 @@ export function DocumentsView({
                     "Unsaved changes"
                   ) : (
                     <>
-                      <Check size={15} /> Saved
+                      <Check size={15} /> {temporary ? "Preview only" : "Saved to repository"}
                     </>
                   )}
                 </span>
@@ -193,9 +224,33 @@ export function DocumentsView({
             </div>
           )}
 
+          {editing?.error && <p className="write-feedback" role="alert">{editing.error}</p>}
+          {editing?.latest && (
+            <section className="write-conflict" role="alert">
+              <strong>The repository version changed. Your draft is still here.</strong>
+              <details open>
+                <summary>Latest repository version</summary>
+                <pre>{editing.latest.content}</pre>
+              </details>
+              <button type="button" className="button button--secondary" onClick={() => {
+                setDrafts((current) => ({
+                  ...current,
+                  [selectedDocument.id]: { content: editing.content, revision: editing.latest?.revision },
+                }));
+              }}>
+                Keep draft and use latest revision
+              </button>
+            </section>
+          )}
           {mode === "preview" ? (
             <div className="document-scroll">
-              <MarkdownDocument content={draft} />
+              <MarkdownDocument
+                content={draft}
+                filename={selectedDocument.filename}
+                assets={assets}
+                documents={documents}
+                onOpenDocument={setSelectedId}
+              />
             </div>
           ) : (
             <textarea
@@ -203,7 +258,8 @@ export function DocumentsView({
               value={draft}
               spellCheck
               aria-label={`${selectedDocument.title} Markdown`}
-              onChange={(event) => setDraft(event.target.value)}
+              disabled={saving}
+              onChange={(event) => updateDraft(event.target.value)}
             />
           )}
         </main>

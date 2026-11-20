@@ -1,65 +1,33 @@
 # ProtoRaft
 
-ProtoRaft is an open-source Codex plugin for turning early product thinking into
-traceable wireflows, lightweight product documents, design tokens, component
-specifications, and interactive HiFi previews.
+ProtoRaft is a simple, versatile, open-source Codex plugin for product design.
+It keeps wireframes, discussion notes, and product specs together in Git so
+teammates can see what changed, why it changed, and what to build next.
 
-The v0.1 workbench is designed for product and marketing teams. It keeps project
-artifacts in a user-selected Git repository so teammates can review changes
-through familiar branches and pull requests.
+The [Morrow sample](examples/morrow) shows the v1.1 workflow.
 
-> [!WARNING]
-> ProtoRaft v0.1 is a work in progress and is not ready for production use.
-> Current development is focused on refining the Morrow sample and validating
-> the complete Codex plugin workflow.
+## Work with Codex
 
-## Product philosophy
+The workbench runs as an MCP App in Codex, where bundled Skills guide the agent
+through design, review, and handoff. ProtoRaft uses ImageGen for wireframes and
+can use Codex scheduled tasks for recurring checks and Codex Sites to share
+read-only snapshots.
 
-ProtoRaft is deliberately small. It should shorten a product conversation, not
-create another process that needs managing.
+## Build on ProtoRaft
 
-### One minute: get something worth discussing
-
-Wireframe turns a new requirement into one atomic prototype in about a minute.
-The result opens as a large wireframe, stays separate from HiFi, and keeps short
-screen-linked discussion notes beside it. It is useful immediately before a
-meeting, during a meeting, or when thinking through an idea alone.
-
-### Five minutes: establish the shared core
-
-Design System turns approved wireframes into web-based design tokens, component
-contracts, routes, states, and interactive HiFi previews. `Sync core` hands the
-same neutral intent to Android and iOS repositories. Bundled Skills help agents
-convert it into native patterns, split the work, verify captures, and run a
-bounded build-and-correct loop.
-
-### Review only what changed
-
-Collaboration compares Git branches and puts the changed artifact first. Color
-is reserved for the small amount of information that needs attention. ProtoRaft
-does not add live cursors, a second task tracker, or a database beside Git.
-
-Our working rules:
-
-- Put one primary action and one primary artifact on each page.
-- Keep explanations next to the work and reveal secondary context on demand.
-- Prefer readable type and whitespace over fitting everything above the fold.
-- Store durable artifacts in Git-readable files.
-- Do not add a feature unless it makes alignment faster or clearer.
+You're welcome to fork this repository and build on the workbench. Add your own
+Skills, project conventions, or review steps to fit the way your team works.
 
 ## Runtime surfaces
-
-ProtoRaft has three deliberately different surfaces:
 
 | Surface | Purpose | Available capabilities |
 | --- | --- | --- |
 | Standalone preview | Fast UI development with the fictional Morrow fixture | Navigation, responsive layout, maps, documents, and interactive HiFi |
-| Installed Codex plugin | The real local product workflow | Repository-backed MCP tools, file writes, agent messages, Skills, scheduled-task requests, and Sites handoff |
-| Published Production site | Shareable review | Read-only default-branch project snapshot |
+| Installed Codex plugin | Edit and review a local project | Repository-backed MCP tools, file writes, agent messages, Skills, scheduled-task requests, and Sites handoff |
+| Published review site | Shareable review | Read-only Production snapshot or a pinned branch comparison |
 
-The standalone preview cannot call MCP tools, send messages to Codex, create a
-scheduled task, or publish a Site. Controls that require the Codex host must say
-so instead of simulating success.
+Standalone preview notes and edits are temporary. Use the installed plugin to
+write to a repository, send requests to Codex, schedule checks, or publish a site.
 
 ## Prerequisites
 
@@ -68,9 +36,8 @@ so instead of simulating success.
 - Git
 - An existing repository containing `protoraft.project.json`
 
-For the first installed-plugin test, use
-[ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample). ProtoRaft v0.1
-does not initialize an arbitrary repository yet.
+Open `examples/morrow` for a project with an existing manifest and a sample review
+branch.
 
 Image generation requires ImageGen in the active Codex environment. Publishing
 requires Codex Sites. Native handoff requires a confirmed Android or iOS target
@@ -80,7 +47,7 @@ tasks to be enabled in the Codex desktop app.
 ## Run the standalone preview
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -91,14 +58,28 @@ mobile prototype.
 ## Verify the plugin package
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm verify
 ```
 
 `pnpm verify` type-checks the app, runs the MCP and project-store tests, creates
 the single-file MCP App and bundled stdio server, then validates the plugin
-manifest and every Skill. It requires a local Codex installation because the
-official plugin and Skill validators ship with Codex.
+manifest, Skill metadata, and packaged files. The build generates third-party
+license notices in `plugins/protoraft/dist`.
+
+After building, run the MCP App browser regression against a disposable clone of
+a standalone checkout of the Morrow sample. The script starts its own local host, uses a background tab
+on the configured Chromium CDP endpoint, and removes the clone and tab when it
+finishes. An optional final argument supplies a generated PNG instead of the
+sample image.
+
+```bash
+node plugins/protoraft/tests/workbench-smoke.mjs /path/to/ProtoRaft-Sample
+```
+
+Set `PROTORAFT_TEST_CDP` to override the default `http://127.0.0.1:9333`.
+The test exercises the real bundle and stdio MCP server. It records Agent handoffs
+locally so it can test publishing without deploying a site.
 
 ## Install locally in Codex
 
@@ -124,14 +105,13 @@ full-screen MCP App. No persistent localhost service is required.
 
 1. Open `ProtoRaft-Sample` and confirm the Morrow project loads from Git files.
 2. Add one discussion note and save one Markdown document.
-3. Queue one atomic wireframe and confirm Codex receives the generation request.
+3. Queue one atomic wireframe and confirm Codex receives the request ID and the resulting wireframe opens in the original canvas.
 4. Compare the sample branch with `main`.
 5. Create a canvas-freshness scheduled task and confirm it appears in
    **Scheduled** with the selected cadence and execution environment.
-6. Optionally prepare and publish the read-only Production view with Codex
-   Sites.
+6. Optionally verify the branch and commit, then publish a read-only snapshot with Codex Sites.
 7. Ask to open a repository without `protoraft.project.json` and confirm the
-   agent explains the v0.1 boundary without inventing or writing project files.
+   agent explains the v1.1 boundary without inventing or writing project files.
 
 ## How the plugin works
 
@@ -139,7 +119,7 @@ The installable package lives in `plugins/protoraft/`. Its runtime is a bundled
 Node stdio MCP server plus a single-file MCP App. Git-readable project files are
 the source of truth; the workbench does not add a database.
 
-Wireframe generation and native sync are agent-driven in v0.1. The workbench
+Wireframe generation and native sync are agent-driven in v1.1. The workbench
 queues durable requests and stores reviewable artifacts, while Codex performs
 ImageGen or target-repository implementation after reading the bundled Skills.
 
@@ -161,7 +141,7 @@ verification, and bounded correction have different inputs and stopping
 conditions. `sync-native-core` coordinates the other three instead of
 duplicating their instructions.
 
-## Current v0.1 boundaries
+## Current v1.1 boundaries
 
 - The first installed workflow is centered on the Morrow sample. Project
   initialization is not implemented yet.
@@ -179,12 +159,12 @@ duplicating their instructions.
 ## Repository layout
 
 - `plugins/protoraft/`: Codex plugin, Skills, MCP server, and workbench UI.
-- [ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample): Official Morrow
-  sample with five connected screens and a reviewable Git branch scenario.
-- `CONTRIBUTING.md`: contribution, licensing, and verification rules.
+- [`examples/morrow/`](examples/morrow): Morrow sample source, wireframes, and a
+  Git branch review scenario.
+- [Contributing](CONTRIBUTING.md): local setup, testing, and contributions.
+- [Changelog](CHANGELOG.md) and [security reporting](SECURITY.md).
 
-ProtoRaft v0.1 supports asynchronous Git collaboration. It does not claim
-Figma-style live cursors or simultaneous editing. A public-directory release
-will also need final listing artwork, marketplace copy, and a recorded
-cross-surface evaluation pass; those are not required for the first local
-installation.
+## License
+
+ProtoRaft is licensed under the [Apache License 2.0](LICENSE). The bundled
+Morrow sample is distributed under its [MIT license](examples/morrow/LICENSE).
