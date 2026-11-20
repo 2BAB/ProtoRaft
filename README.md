@@ -164,3 +164,8 @@ duplicating their instructions.
 - [ProtoRaft-Sample](https://github.com/2BAB/ProtoRaft-Sample): Official Morrow
   sample with five connected screens and a reviewable Git branch scenario.
 - `CONTRIBUTING.md`: contribution, licensing, and verification rules.
+
+## License
+
+ProtoRaft is licensed under the [Apache License 2.0](LICENSE). The bundled
+Morrow sample is distributed under its [MIT license](examples/morrow/LICENSE).
