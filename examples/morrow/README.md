@@ -6,13 +6,11 @@ documents, design tokens, and the contracts for five preview routes.
 
 ## Open in ProtoRaft
 
-Open this folder in Codex with the ProtoRaft plugin installed and ask:
+Open `examples/morrow` in Codex with the ProtoRaft plugin installed and ask:
 
 > Open this repository with ProtoRaft and show me the workbench.
 
-The workbench reads `protoraft.project.json`. If you are using the
-`examples/morrow` copy inside the ProtoRaft workspace, point Codex at that
-directory.
+The workbench reads `protoraft.project.json` from this folder.
 
 ## Review the player change
 

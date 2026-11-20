@@ -69,20 +69,19 @@ the single-file MCP App and bundled stdio server (along with third-party license
 notices in `plugins/protoraft/dist`), and validates the plugin manifest, Skills,
 and packaged files.
 
-Once the build succeeds, you can run the browser regression test against a
-standalone checkout of the Morrow sample:
+Once the build succeeds, run the browser regression test against the bundled
+Morrow sample:
 
 ```bash
-node plugins/protoraft/tests/workbench-smoke.mjs /path/to/ProtoRaft-Sample
+node plugins/protoraft/tests/workbench-smoke.mjs
 ```
 
-The script clones the sample into a temp directory, boots a local host over the
-real bundle and stdio MCP server, and drives it in a background Chromium tab
-(cleaning up both the clone and the tab when it finishes). You can pass an
-optional PNG path as a second argument to test with a generated image instead of
-the default fixture, or set `PROTORAFT_TEST_CDP` to override the default CDP
-endpoint (`http://127.0.0.1:9333`). Agent handoffs are recorded locally so
-publishing flows are covered without deploying a live site.
+The script clones this repository into a temporary directory and opens
+`examples/morrow` with the built MCP App and stdio server. Keep `main` and
+`feature/morrow-listen` available for the branch review. You can pass a PNG path
+to use a generated image in the test. Set `PROTORAFT_TEST_CDP` to override the
+default Chromium endpoint (`http://127.0.0.1:9333`). The script cleans up its
+temporary clone and background tab, and records publishing handoffs locally.
 
 ## Install locally in Codex
 
@@ -105,8 +104,7 @@ local server to keep running.
 
 ### First installed smoke test
 
-1. Open `examples/morrow` (or a standalone `ProtoRaft-Sample` clone) and check
-   that the project loads from Git files.
+1. Open `examples/morrow` and check that the project loads from Git files.
 2. Add a discussion note and edit a Markdown document, then save both.
 3. Queue a wireframe and check that Codex receives the request ID and puts the
    generated result back onto the original canvas.
