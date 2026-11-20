@@ -28,6 +28,16 @@ function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
 }
 
+function hasRef(cwd, ref) {
+  try {
+    git(cwd, "show-ref", "--verify", "--quiet", ref);
+    return true;
+  } catch (error) {
+    if (error.status === 1) return false;
+    throw error;
+  }
+}
+
 async function connectMcp() {
   const client = new Client({ name: "ProtoRaft smoke", version: "1" });
   clients.push(client);
@@ -92,7 +102,14 @@ frame.src = "/app";
 
 try {
   git(scratch, "clone", "--quiet", "--no-hardlinks", resolve(source), root);
-  git(root, "branch", "--track", "feature/morrow-listen", "origin/feature/morrow-listen");
+  const compareBranch = "feature/morrow-listen";
+  if (hasRef(root, `refs/remotes/origin/${compareBranch}`)) {
+    git(root, "branch", compareBranch, `origin/${compareBranch}`);
+  } else {
+    // A normal checkout may keep the demo branch only as a remote-tracking ref.
+    git(root, "fetch", "--no-tags", resolve(source),
+      `refs/remotes/origin/${compareBranch}:refs/heads/${compareBranch}`);
+  }
   const client = await connectMcp();
   const peer = await connectMcp();
   const call = (name, args, connection = client) => connection.callTool({ name, arguments: args });
