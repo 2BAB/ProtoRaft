@@ -5,7 +5,7 @@ notes, product specs, and design tokens live in Git alongside your code, so
 reviews happen through regular branches and pull requests instead of a separate
 tool.
 
-To see the v1.1 workflow end to end, start with the bundled
+To try the workflow end to end, start with the bundled
 [Morrow sample](examples/morrow).
 
 ![Morrow's five connected wireframes in the ProtoRaft workbench](docs/images/morrow-workbench.png)
@@ -106,6 +106,9 @@ As long as the repo has a `protoraft.project.json`, Codex resolves its path,
 calls `open_protoraft_workbench`, and opens the MCP App full screen, with no
 local server to keep running.
 
+In **Design → Screens**, choose **Ask for changes** to highlight a module in the
+HiFi preview and send feedback to Codex with the screen and module details.
+
 ### First installed smoke test
 
 1. Open `examples/morrow` and check that the project loads from Git files.
@@ -132,7 +135,7 @@ local server to keep running.
 `sync-native-core` ties the other three native Skills together, so planning,
 visual checks, and fix loops can each run with their own inputs and exit rules.
 
-## Current limitations (v1.1)
+## Current limitations
 
 - Project initialization isn't built yet. ProtoRaft expects an existing
   `protoraft.project.json` and is still centered around the Morrow sample.

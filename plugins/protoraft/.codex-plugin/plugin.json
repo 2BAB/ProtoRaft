@@ -1,6 +1,6 @@
 {
   "name": "protoraft",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Turn a product idea into a discussion-ready wireframe, shared design core, and implementation preview.",
   "author": {
     "name": "2BAB"
@@ -28,6 +28,7 @@
       "Product documentation",
       "Design tokens and components",
       "Interactive HiFi previews",
+      "Module-level HiFi feedback in Codex",
       "Android and iOS core sync",
       "Git branch comparison",
       "Scheduled canvas freshness review",

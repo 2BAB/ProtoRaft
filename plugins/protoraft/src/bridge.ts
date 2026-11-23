@@ -55,7 +55,7 @@ export async function connectProtoRaftApp(
   }
 
   const app = new App(
-    { name: "ProtoRaft", version: "1.1.0" },
+    { name: "ProtoRaft", version: "1.2.0" },
     { availableDisplayModes: ["inline", "fullscreen"] },
     { autoResize: true },
   );

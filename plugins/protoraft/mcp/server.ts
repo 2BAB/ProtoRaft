@@ -31,7 +31,7 @@ function result(payload: Record<string, unknown>, message: string) {
 function createServer() {
   const server = new McpServer({
     name: "protoraft",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   registerAppResource(
