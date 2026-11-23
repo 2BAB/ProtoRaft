@@ -33,7 +33,7 @@ interface MorrowPreviewProps {
 
 function StatusBar() {
   return (
-    <div className="morrow-statusbar" aria-hidden="true">
+    <div className="morrow-statusbar" aria-hidden="true" data-review-target="status-bar" data-review-label="Status bar">
       <svg
         viewBox="0 0 390 60"
         fill="none"
@@ -103,7 +103,7 @@ function BottomNavigation({
   onChange: (screen: ScreenId) => void;
 }) {
   return (
-    <nav className="morrow-bottom-nav" aria-label="Morrow">
+    <nav className="morrow-bottom-nav" aria-label="Morrow" data-review-target="bottom-navigation" data-review-label="Bottom navigation">
       <button
         type="button"
         className={active === "today" ? "is-active" : ""}
@@ -134,7 +134,7 @@ function BottomNavigation({
 
 function PublicationHeader() {
   return (
-    <header className="morrow-publication-header">
+    <header className="morrow-publication-header" data-review-target="publication-header" data-review-label="Publication header">
       <button type="button" aria-label="Open menu">
         <Menu size={20} />
       </button>
@@ -156,11 +156,11 @@ function TodayScreen({
     <div className="morrow-screen morrow-screen--today">
       <PublicationHeader />
       <main className="morrow-scroll">
-        <div className="morrow-edition">
+        <div className="morrow-edition" data-review-target="edition" data-review-label="Edition date and intro">
           <span>MONDAY, JULY 28</span>
           <p>Five stories selected for a thoughtful morning.</p>
         </div>
-        <div className="morrow-topics" aria-label="Topics">
+        <div className="morrow-topics" aria-label="Topics" data-review-target="topics" data-review-label="Topic filters">
           {["Today", "Ideas", "Culture", "Science"].map((item) => (
             <button
               key={item}
@@ -175,6 +175,8 @@ function TodayScreen({
         <button
           type="button"
           className="morrow-lead-story"
+          data-review-target="lead-story"
+          data-review-label="Lead story card"
           onClick={() => onScreenChange("story")}
         >
           <img src={editorialImage} alt="Morning commuters cross a city bridge" />
@@ -188,7 +190,7 @@ function TodayScreen({
             <em>By Lena Ortiz · 8 min read</em>
           </span>
         </button>
-        <section className="morrow-briefing">
+        <section className="morrow-briefing" data-review-target="briefing" data-review-label="The Briefing list">
           <header>
             <h2>The Briefing</h2>
             <span>4 stories</span>
@@ -223,7 +225,7 @@ function StoryScreen({
   const [saved, setSaved] = useState(false);
   return (
     <div className="morrow-screen morrow-screen--story">
-      <header className="morrow-context-header">
+      <header className="morrow-context-header" data-review-target="story-header" data-review-label="Story navigation">
         <button
           type="button"
           aria-label="Back to Today"
@@ -237,7 +239,7 @@ function StoryScreen({
         </button>
       </header>
       <main className="morrow-scroll">
-        <article className="morrow-article">
+        <article className="morrow-article" data-review-target="story-article" data-review-label="Story article">
           <small>CITIES</small>
           <h1>A City Learning to Listen</h1>
           <p className="morrow-deck">
@@ -250,10 +252,12 @@ function StoryScreen({
           </div>
           <img
             className="morrow-article-image"
+            data-review-target="story-image"
+            data-review-label="Story image"
             src={editorialImage}
             alt="Morning commuters cross a city bridge"
           />
-          <div className="morrow-article-actions">
+          <div className="morrow-article-actions" data-review-target="story-actions" data-review-label="Story actions">
             <button type="button" onClick={() => setSaved((value) => !value)}>
               {saved ? <Check size={18} /> : <Bookmark size={18} />}
               {saved ? "Saved" : "Save"}
@@ -271,7 +275,7 @@ function StoryScreen({
               Share
             </button>
           </div>
-          <div className="morrow-article-body">
+          <div className="morrow-article-body" data-review-target="story-body" data-review-label="Story body">
             <p>
               Just after seven, the bridge begins to fill. The first wave moves
               quickly, eyes trained on the path ahead. Ten minutes later the
@@ -309,6 +313,8 @@ function FocusScreen({
     >
       <header
         className={`morrow-focus-header ${controlsVisible ? "is-visible" : ""}`}
+        data-review-target="focus-header"
+        data-review-label="Reading progress header"
       >
         <button
           type="button"
@@ -331,6 +337,8 @@ function FocusScreen({
       </header>
       <main
         className="morrow-focus-copy"
+        data-review-target="focus-copy"
+        data-review-label="Focus reading text"
         style={{ "--reader-scale": textScale } as React.CSSProperties}
       >
         <small>CITIES</small>
@@ -360,6 +368,8 @@ function FocusScreen({
         className={`morrow-focus-toolbar ${
           controlsVisible ? "is-visible" : ""
         }`}
+        data-review-target="focus-toolbar"
+        data-review-label="Reading controls"
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -397,7 +407,7 @@ function ListenScreen({
   const [speed, setSpeed] = useState(1);
   return (
     <div className="morrow-screen morrow-screen--listen">
-      <header className="morrow-context-header">
+      <header className="morrow-context-header" data-review-target="listen-header" data-review-label="Player navigation">
         <button
           type="button"
           aria-label="Back"
@@ -410,12 +420,12 @@ function ListenScreen({
           <ListMusic size={20} />
         </button>
       </header>
-      <main className="morrow-player">
-        <img src={editorialImage} alt="Morning commuters cross a city bridge" />
+      <main className="morrow-player" data-review-target="player" data-review-label="Audio story details">
+        <img src={editorialImage} alt="Morning commuters cross a city bridge" data-review-target="player-image" data-review-label="Audio cover image" />
         <small>MORROW AUDIO</small>
         <h1>A City Learning to Listen</h1>
         <p>Lena Ortiz · 18 minutes</p>
-        <label className="morrow-player-progress">
+        <label className="morrow-player-progress" data-review-target="playback-progress" data-review-label="Playback progress">
           <span className="sr-only">Playback position</span>
           <input
             type="range"
@@ -429,7 +439,7 @@ function ListenScreen({
             <em>-11:36</em>
           </span>
         </label>
-        <div className="morrow-player-controls">
+        <div className="morrow-player-controls" data-review-target="playback-controls" data-review-label="Playback controls">
           <button type="button" aria-label="Rewind 15 seconds">
             <RotateCcw size={25} />
             <span>15</span>
@@ -451,7 +461,7 @@ function ListenScreen({
             <span>30</span>
           </button>
         </div>
-        <div className="morrow-player-options">
+        <div className="morrow-player-options" data-review-target="playback-options" data-review-label="Speed and download">
           <button
             type="button"
             onClick={() =>
@@ -470,6 +480,8 @@ function ListenScreen({
         <button
           type="button"
           className="morrow-open-article"
+          data-review-target="open-article"
+          data-review-label="Open written story button"
           onClick={() => onScreenChange("story")}
         >
           <BookOpen size={18} />
@@ -491,7 +503,7 @@ function SavedScreen({
     <div className="morrow-screen morrow-screen--saved">
       <PublicationHeader />
       <main className="morrow-scroll">
-        <header className="morrow-library-heading">
+        <header className="morrow-library-heading" data-review-target="saved-heading" data-review-label="Saved stories heading">
           <span>
             <h1>Saved</h1>
             <p>7 stories</p>
@@ -500,7 +512,7 @@ function SavedScreen({
             <MoreHorizontal size={21} />
           </button>
         </header>
-        <div className="morrow-library-filters">
+        <div className="morrow-library-filters" data-review-target="saved-filters" data-review-label="Saved story filters">
           {["All", "Unread", "Downloaded"].map((item) => (
             <button
               key={item}
@@ -512,7 +524,7 @@ function SavedScreen({
             </button>
           ))}
         </div>
-        <section className="morrow-progress-story">
+        <section className="morrow-progress-story" data-review-target="continue-reading" data-review-label="Continue reading card">
           <span>CONTINUE READING · 42%</span>
           <button type="button" onClick={() => onScreenChange("story")}>
             <img src={editorialImage} alt="" />
@@ -525,7 +537,7 @@ function SavedScreen({
             </span>
           </button>
         </section>
-        <section className="morrow-saved-list">
+        <section className="morrow-saved-list" data-review-target="saved-stories" data-review-label="Recently saved stories">
           <h2>Recently saved</h2>
           <button type="button" onClick={() => onScreenChange("story")}>
             <span>

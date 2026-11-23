@@ -877,6 +877,17 @@ export default function App() {
               activeWorkspaceView={designView}
               onWorkspaceViewChange={setDesignView}
               onScreenChange={setActivePreview}
+              onRequestChange={liveReview ? async (screen, request) => {
+                const sent = await bridgeRef.current.askAgent([
+                  "ProtoRaft HiFi change request",
+                  `Project: ${project.name} (projectId: ${project.projectId})`,
+                  `Screen: ${screen.title} (${screen.route}, id: ${screen.id})`,
+                  `Module: ${request.moduleLabel} (data-review-target="${request.moduleId}")`,
+                  `Change: ${request.comment}`,
+                ].join("\n"));
+                if (sent) setToast("Change request sent to Codex.");
+                return sent;
+              } : undefined}
             />
           )}
           {(!readOnly || sharedReview) && section === "collaboration" && (

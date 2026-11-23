@@ -1,9 +1,7 @@
-import {
-  List,
-  Network,
-} from "lucide-react";
+import { List, Network } from "lucide-react";
 import { useState } from "react";
 import { MorrowPreview } from "../components/MorrowPreview";
+import { ReviewablePreview, type PreviewChangeRequest } from "../components/ReviewablePreview";
 import { ScreenMap } from "../components/ScreenMap";
 import { WorkspaceSubnav } from "../components/WorkspaceSubnav";
 import type {
@@ -20,6 +18,7 @@ interface HiFiViewProps {
   activeWorkspaceView: DesignWorkspaceView;
   onWorkspaceViewChange: (view: DesignWorkspaceView) => void;
   onScreenChange: (id: ScreenId) => void;
+  onRequestChange?: (screen: PrototypeScreen, request: PreviewChangeRequest) => Promise<boolean>;
 }
 
 type ScreenViewMode = "map" | "list";
@@ -39,8 +38,12 @@ export function HiFiView({
   activeWorkspaceView,
   onWorkspaceViewChange,
   onScreenChange,
+  onRequestChange,
 }: HiFiViewProps) {
   const [viewMode, setViewMode] = useState<ScreenViewMode>("map");
+  const screen = screens.find((item) => item.id === activeScreen);
+  const reviewable = screen && onRequestChange;
+  const preview = <MorrowPreview activeScreen={activeScreen} onScreenChange={onScreenChange} />;
 
   return (
     <section className="workspace-view hifi-view">
@@ -112,12 +115,13 @@ export function HiFiView({
         <main
           className={`phone-stage ${
             viewMode === "map" ? "phone-stage--map" : ""
-          }`}
+          }${reviewable ? " phone-stage--reviewable" : ""}`}
         >
-          <MorrowPreview
-            activeScreen={activeScreen}
-            onScreenChange={onScreenChange}
-          />
+          {screen && onRequestChange ? (
+            <ReviewablePreview key={activeScreen} onSend={(request) => onRequestChange(screen, request)}>
+              {preview}
+            </ReviewablePreview>
+          ) : preview}
         </main>
       </div>
     </section>

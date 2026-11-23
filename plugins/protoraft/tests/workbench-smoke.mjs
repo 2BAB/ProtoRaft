@@ -138,6 +138,7 @@ try {
   });
   const calls = [];
   const messages = [];
+  let rejectNextMessage = false;
   let reviewHtml = "";
   server = createServer(async (request, response) => {
     try {
@@ -169,8 +170,13 @@ try {
       } else if (request.url === "/open") {
         result = await call("open_protoraft_workbench", { rootPath: root });
       } else if (request.url === "/message") {
-        messages.push(...input.content.map((part) => part.text));
-        result = {};
+        if (rejectNextMessage) {
+          rejectNextMessage = false;
+          result = { isError: true };
+        } else {
+          messages.push(...input.content.map((part) => part.text));
+          result = {};
+        }
       }
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify(result ?? {}));
@@ -247,6 +253,49 @@ try {
   await pageConnection.send("Page.navigate", { url });
   await checkCanvas();
   await has("Connected", ".status-connection");
+
+  await click("Design", ".sidebar");
+  await click("Screens");
+  await click("Ask for changes");
+  await wait("highlight the lead story from its heading", () => {
+    const doc = document.querySelector("iframe").contentDocument;
+    const heading = doc.querySelector('.phone-stage [data-review-target="lead-story"] strong');
+    heading.dispatchEvent(new doc.defaultView.PointerEvent("pointerover", { bubbles: true }));
+    return heading.closest("[data-review-hovered]") !== null;
+  });
+  await evaluate(() => document.querySelector("iframe").contentDocument
+    .querySelector('.phone-stage [data-review-target="lead-story"] strong').click());
+  await wait("select the lead story without navigating", () => {
+    const doc = document.querySelector("iframe").contentDocument;
+    return doc.querySelector('[data-review-target="lead-story"][data-review-selected]') !== null;
+  });
+  const feedback = "Make the lead story headline easier to scan.";
+  await setField(".preview-feedback-form textarea", feedback);
+  rejectNextMessage = true;
+  await click("Send to Codex", ".preview-feedback-form");
+  await has("Your draft is still here", ".preview-feedback-form");
+  assert.equal(await fieldValue(".preview-feedback-form textarea"), feedback);
+  assert.equal(messages.length, 0);
+  await click("Send to Codex", ".preview-feedback-form");
+  await has("Change request sent to Codex.");
+  assert.equal(messages.length, 1);
+  assert.ok(messages[0].includes(`projectId: ${projectId}`));
+  assert.match(messages[0], /Screen: Today \(\/today, id: today\)/);
+  assert.match(messages[0], /Module: Lead story card \(data-review-target="lead-story"\)/);
+  assert.ok(messages[0].endsWith(`\nChange: ${feedback}`));
+  await evaluate(() => document.querySelector("iframe").contentDocument
+    .querySelector('.phone-stage [data-review-target="lead-story"]').click());
+  await wait("restore prototype navigation after sending", () => Boolean(document.querySelector("iframe")
+    .contentDocument.querySelector(".phone-stage .morrow-screen--story")));
+  await click("Ask for changes");
+  await setField(".preview-feedback-form select", "story-actions");
+  await wait("select a Story module without a pointer", () => Boolean(document.querySelector("iframe")
+    .contentDocument.querySelector('[data-review-target="story-actions"][data-review-selected]')));
+  await click("Cancel", ".preview-feedback-form");
+  assert.equal(messages.length, 1);
+  console.log("PASS HiFi module annotation, message context, retry, and prototype navigation");
+
+  await click("Product", ".sidebar");
   await click("Documents");
   await click("Edit");
   const docPath = join(root, "documents/product-brief.md");
@@ -459,6 +508,10 @@ try {
     width: 390, height: 844, deviceScaleFactor: 1, mobile: true,
   });
   await has("Read only");
+  await click("Design", ".sidebar");
+  await click("Screens");
+  await has("Screen Preview", ".hifi-view");
+  assert.equal(await evaluate(() => document.querySelector(".preview-feedback-toggle") === null), true);
   console.log("PASS committed branch and commit, read-only browser review, Markdown images and document link");
 
   await pageConnection.send("Page.navigate", { url: `${url}/web` });
